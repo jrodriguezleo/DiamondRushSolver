@@ -9,6 +9,16 @@ import pyautogui
 from skimage.metrics import structural_similarity as ssim
 
 
+# TODO crear un nodo game state para ir guardanndo los estados del juego simulados
+# TODO crear algoritmo A star
+# TODO crear acciones posibles en game state y ponerles peso
+# TODO crear heuristicac para el algoritmo A star
+# TODO poder enviar acciones al juego por medio de simulacion de teclado
+# TODO preocuparse de paralelizar la simulacion de juego
+# TODO poder simular acciones del juego de forma eficiente (no simular cada paso del pj, solo acciones en el mundo relevantes)
+# TODO crear la funcion que permita simular el juego
+# TODO recortar assets en resolucion de portatil 1366x768
+
 class Cell:
     def __init__(self, row, col, cell_type):
         self.row = row
@@ -18,22 +28,50 @@ class Cell:
         self.neighbor_down = None
         self.neighbor_left = None
         self.neighbor_right = None
-
-        # Por defecto se puede caminar en este terreno excepto si hace match con lo de mas abajo
+        self.weight = 1
         self.walkable = True
+
+        # De acuerdo al tipo de celda ya se pone un primer peso y si se puede caminar encima de el
         match cell_type:
+            case "terrain":
+                self.walkable = True
+                self.weight = 2
+            case "spike":
+                self.walkable = True
+                self.weight = 10
+            case "diamond":
+                self.walkable = True
+                self.weight = 3
+            case "key":
+                self.walkable = True
+                self.weight = 4
+            case "ladder-open":
+                self.walkable = True
+                self.weight = 1
+            case "rock-in-fall":
+                self.walkable = True
+                self.weight = 2
+            case "push-button":
+                self.walkable = True
+                self.weight = 2
             case "door":
                 self.walkable = False
+                self.weight = 100000
             case "rock":
                 self.walkable = False
+                self.weight = 100000
             case "fall":
                 self.walkable = False
+                self.weight = 100000
             case "metal-door":
                 self.walkable = False
+                self.weight = 100000
             case "ladder":
                 self.walkable = False
+                self.weight = 100000
             case "spike-up":
                 self.walkable = False
+                self.weight = 100000
         
 
     def __repr__(self):
@@ -601,6 +639,7 @@ def debug_mode():
                 print(f"Celda ({i}, {j}): {nodes_in_game[i][j].cell_type}")
             else:
                 print(f"Celda ({i}, {j}): None")
+    
     # Mostrar resultados
     cv2.imshow("Resultado", img_res)
     cv2.waitKey(0)
