@@ -8,6 +8,37 @@ import pyautogui
 
 from skimage.metrics import structural_similarity as ssim
 
+
+class Cell:
+    def __init__(self, row, col, cell_type):
+        self.row = row
+        self.col = col
+        self.cell_type = cell_type
+        self.neighbor_up = None
+        self.neighbor_down = None
+        self.neighbor_left = None
+        self.neighbor_right = None
+
+        # Por defecto se puede caminar en este terreno excepto si hace match con lo de mas abajo
+        self.walkable = True
+        match cell_type:
+            case "door":
+                self.walkable = False
+            case "rock":
+                self.walkable = False
+            case "fall":
+                self.walkable = False
+            case "metal-door":
+                self.walkable = False
+            case "ladder":
+                self.walkable = False
+            case "spike-up":
+                self.walkable = False
+        
+
+    def __repr__(self):
+        return f"Cell({self.row}, {self.col}, {self.cell_type})"
+
 def read_screen_debug(path : str) -> tuple[str, str]:
     img = cv2.imread(path, cv2.IMREAD_COLOR)
     return img
@@ -402,9 +433,11 @@ def tag_cells(img_res, img, templates_raw, contours_spike, contours_diamond, con
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 0), 1)
                     match_found_by_template = True
 
-                    # TODO poner un nombre estandar segun plantilla con un match
-                    grid[i][j] = Cell(name, cell_roi, cell_x, cell_y, cell_w, cell_h)
+                    # Si el nombre termina con un numero, cortar ese numero antes de guardar el nombre enn el nodo
+                    name = re.sub(r'\d+$', '', name)
+                    grid[i][j] = Cell(cell_type = name, row = i, col = j)
                     break
+
             if match_found_by_template: continue
 
             # --- Verificar si la celda tiene spikes --- #
@@ -415,7 +448,7 @@ def tag_cells(img_res, img, templates_raw, contours_spike, contours_diamond, con
                 cv2.putText(img_res, "Spike", (cell_x, cell_y - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
                 name = "spike"
-                grid[i][j] = Cell(name, cell_roi, cell_x, cell_y, cell_w, cell_h)
+                grid[i][j] = Cell(cell_type = name, row = i, col = j)
                 continue
             
             if detect_fall(cell_roi, contours_fall):
@@ -424,6 +457,8 @@ def tag_cells(img_res, img, templates_raw, contours_spike, contours_diamond, con
                 # Poner el texto "Fall" en la celda
                 cv2.putText(img_res, "Fall", (cell_x, cell_y - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.35, (60, 60, 255), 1)
+                name = "fall"
+                grid[i][j] = Cell(cell_type = name, row = i, col = j)
                 continue
 
             # if detect_diamond(cell_roi, contours_diamond):
@@ -475,75 +510,67 @@ def tag_cells(img_res, img, templates_raw, contours_spike, contours_diamond, con
                 cv2.rectangle(img_res, (cell_x, cell_y), bottom_right, (0, 120, 120), 2)
                 cv2.putText(img_res, "Terreno", (cell_x, cell_y - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 0), 1)
+                name = "terrain"
+                grid[i][j] = Cell(cell_type = name, row = i, col = j)
             
             #cv2.imshow("cell", cell_roi)
             #cv2.waitKey(0)
     
-    # 
+    # Actualizar los vecinos de cada celda
     for i in range(rows):
         for j in range(cols):
             cell = grid[i][j]
-            if i > 0:
-                cell.neighbor_up = grid[i-1][j]
-            if i < rows - 1:
-                cell.neighbor_down = grid[i+1][j]
-            if j > 0:
-                cell.neighbor_left = grid[i][j-1]
-            if j < cols - 1:
-                cell.neighbor_right = grid[i][j+1]
+            if cell is not None:
+                if i > 0:
+                    cell.neighbor_up = grid[i-1][j]
+                if i < rows - 1:
+                    cell.neighbor_down = grid[i+1][j]
+                if j > 0:
+                    cell.neighbor_left = grid[i][j-1]
+                if j < cols - 1:
+                    cell.neighbor_right = grid[i][j+1]
+    
+    return grid
 
 
 def load_templates() -> tuple[dict, dict]:
     # ASSETS en tamaño full screen 1920x1080
     # TODO hacer assets en 1366x768 y probar si esas estan mejor para pantallas mas chicas... probar
     templates_raw = {
-        # TODO renombrar esto con mas orden
-        "door": cv2.imread("Diamond-Rush-Bot/FDoor.png", cv2.IMREAD_COLOR),
-        "diamond": cv2.imread("Diamond-Rush-Bot/FDiamondBGColor.png", cv2.IMREAD_COLOR),
-        "key": cv2.imread("Diamond-Rush-Bot/FKeyBGColor.png", cv2.IMREAD_COLOR),
-        "ladder": cv2.imread("Diamond-Rush-Bot/FLadderBG.png", cv2.IMREAD_COLOR),
-        "ladderpj": cv2.imread("Diamond-Rush-Bot/SSLadderPj.png", cv2.IMREAD_COLOR),
-        "ladderfs": cv2.imread("Diamond-Rush-Bot/ladder-fs.png", cv2.IMREAD_COLOR),
-        "ladderfsopen": cv2.imread("Diamond-Rush-Bot/ladder-fs-open.png", cv2.IMREAD_COLOR),
-        "ladderfsopenpj": cv2.imread("Diamond-Rush-Bot/ladder-fs-open-pj.png", cv2.IMREAD_COLOR),
-        "laddernowalls": cv2.imread("Diamond-Rush-Bot/ladder-no-walls.png", cv2.IMREAD_COLOR),
-        "laddernowalls-open": cv2.imread("Diamond-Rush-Bot/ladder-no-walls-open.png", cv2.IMREAD_COLOR),
-        "player": cv2.imread("Diamond-Rush-Bot/SSplayer1cell.png", cv2.IMREAD_COLOR),
-        "player2": cv2.imread("Diamond-Rush-Bot/SSplayer1cell2.png", cv2.IMREAD_COLOR),
-        "player3": cv2.imread("Diamond-Rush-Bot/player2.png", cv2.IMREAD_COLOR),
-        "player-with-key": cv2.imread("Diamond-Rush-Bot/playerWithKey.png", cv2.IMREAD_COLOR),
-        "player-with-key2": cv2.imread("Diamond-Rush-Bot/playerWithKey2.png", cv2.IMREAD_COLOR),
-        "rock": cv2.imread("Diamond-Rush-Bot/SSrock1.png", cv2.IMREAD_COLOR),
-        "rock-in-fall": cv2.imread("Diamond-Rush-Bot/rock-in-fall.png", cv2.IMREAD_COLOR),
-        "fall1": cv2.imread("Diamond-Rush-Bot/SSfall1.png", cv2.IMREAD_COLOR),
+        "diamond": cv2.imread("Diamond-Rush-Bot/diamond.png", cv2.IMREAD_COLOR),
+        "door": cv2.imread("Diamond-Rush-Bot/door.png", cv2.IMREAD_COLOR),
         "fall": cv2.imread("Diamond-Rush-Bot/fall.png", cv2.IMREAD_COLOR),
-        "terrain": cv2.imread("Diamond-Rush-Bot/FTerrain.png", cv2.IMREAD_COLOR),
-        "spike": cv2.imread("Diamond-Rush-Bot/FSpikeBGColor.png", cv2.IMREAD_COLOR),
+        "key": cv2.imread("Diamond-Rush-Bot/key.png", cv2.IMREAD_COLOR),
+        "ladder1": cv2.imread("Diamond-Rush-Bot/ladder.png", cv2.IMREAD_COLOR),
+        "ladder2": cv2.imread("Diamond-Rush-Bot/ladder-fs.png", cv2.IMREAD_COLOR),
+        "ladder3": cv2.imread("Diamond-Rush-Bot/ladder-pj.png", cv2.IMREAD_COLOR),
+        "ladder4": cv2.imread("Diamond-Rush-Bot/ladder-no-walls.png", cv2.IMREAD_COLOR),
+        "ladder-open1": cv2.imread("Diamond-Rush-Bot/ladder-open.png", cv2.IMREAD_COLOR),
+        "ladder-open2": cv2.imread("Diamond-Rush-Bot/ladder-open-pj.png", cv2.IMREAD_COLOR),
+        "ladder-open3": cv2.imread("Diamond-Rush-Bot/ladder-no-walls-open.png", cv2.IMREAD_COLOR),
+        "player1": cv2.imread("Diamond-Rush-Bot/player-izq.png", cv2.IMREAD_COLOR),
+        "player2": cv2.imread("Diamond-Rush-Bot/player-izq2.png", cv2.IMREAD_COLOR),
+        "player3": cv2.imread("Diamond-Rush-Bot/player-der.png", cv2.IMREAD_COLOR),
+        "player-with-key1": cv2.imread("Diamond-Rush-Bot/player-key-der.png", cv2.IMREAD_COLOR),
+        "player-with-key2": cv2.imread("Diamond-Rush-Bot/player-key-izq.png", cv2.IMREAD_COLOR),
+        "rock": cv2.imread("Diamond-Rush-Bot/rock.png", cv2.IMREAD_COLOR),
+        "rock-in-fall": cv2.imread("Diamond-Rush-Bot/rock-in-fall.png", cv2.IMREAD_COLOR),
+        "terrain": cv2.imread("Diamond-Rush-Bot/terrain.png", cv2.IMREAD_COLOR),
+        "spike": cv2.imread("Diamond-Rush-Bot/spikes.png", cv2.IMREAD_COLOR),
         "metal-door": cv2.imread("Diamond-Rush-Bot/metal-door.png", cv2.IMREAD_COLOR),
         "push_button": cv2.imread("Diamond-Rush-Bot/push_button.png", cv2.IMREAD_COLOR),
-        "spike-up1": cv2.imread("Diamond-Rush-Bot/spikesArriba1.png", cv2.IMREAD_COLOR),
-        "spike-up2": cv2.imread("Diamond-Rush-Bot/spikesArriba2.png", cv2.IMREAD_COLOR),
+        "spike-up1": cv2.imread("Diamond-Rush-Bot/spikes-up1.png", cv2.IMREAD_COLOR),
+        "spike-up2": cv2.imread("Diamond-Rush-Bot/spikes-up2.png", cv2.IMREAD_COLOR),
         
     }
-
-    templates_no_match = {
-        "terrain": cv2.imread("Diamond-Rush-Bot/FTerrain.png", cv2.IMREAD_COLOR),
-        "spike": cv2.imread("Diamond-Rush-Bot/FSpikeBGColor.png", cv2.IMREAD_COLOR),
-        "rock": cv2.imread("Diamond-Rush-Bot/SSrock1.png", cv2.IMREAD_COLOR),
-        "diamond": cv2.imread("Diamond-Rush-Bot/FDiamondBGColor.png", cv2.IMREAD_COLOR),
-        "key": cv2.imread("Diamond-Rush-Bot/FKeyBGColor.png", cv2.IMREAD_COLOR),
-        "fall": cv2.imread("Diamond-Rush-Bot/fall.png", cv2.IMREAD_COLOR), 
-        "door": cv2.imread("Diamond-Rush-Bot/FDoor.png", cv2.IMREAD_COLOR),
-    }
-
-    return templates_raw, templates_no_match
+    return templates_raw
 
 def debug_mode():
     # --- CONFIG ---
     # Diccionario con objetos y su imagen base
-    templates_raw, templates_no_match = load_templates()
+    templates_raw = load_templates()
     # Modo debug
-    img = read_screen_debug("Diamond-Rush-Bot/SC7.png")
+    img = read_screen_debug("Diamond-Rush-Bot/screenshots/screenshot3.png")
     img_res = img.copy()
     # Obtener área del juego
     game_rectangle = get_game_area(img)
@@ -558,15 +585,22 @@ def debug_mode():
     resize_templates(templates_raw, cell_width, cell_height)
 
     # Hallar una sola vez los contornos de los templates
-    contours_spike = find_spike_contours(templates_no_match["spike"])
-    contours_diamond = find_diamond_contours(templates_no_match["diamond"])
-    contours_rock = find_rock_contours(templates_no_match["rock"])
-    contours_key = find_key_contours(templates_no_match["key"])
-    contours_door = find_door_contours(templates_no_match["door"])
-    contours_fall = find_fall_contours(templates_no_match["fall"])
+    contours_spike = find_spike_contours(templates_raw["spike"])
+    contours_diamond = find_diamond_contours(templates_raw["diamond"])
+    contours_rock = find_rock_contours(templates_raw["rock"])
+    contours_key = find_key_contours(templates_raw["key"])
+    contours_door = find_door_contours(templates_raw["door"])
+    contours_fall = find_fall_contours(templates_raw["fall"])
     # ponerle nombre a las celdas
     nodes_in_game = tag_cells(img_res, img, templates_raw, contours_spike, contours_diamond, contours_rock, contours_key, contours_door, contours_fall, game_rectangle, cell_width, cell_height, rows=15, cols=10)
-
+    
+    # Imprimir en consola los nodos encontrados de manera legible para un humano
+    for i in range(len(nodes_in_game)):
+        for j in range(len(nodes_in_game[i])):
+            if nodes_in_game[i][j] is not None:
+                print(f"Celda ({i}, {j}): {nodes_in_game[i][j].cell_type}")
+            else:
+                print(f"Celda ({i}, {j}): None")
     # Mostrar resultados
     cv2.imshow("Resultado", img_res)
     cv2.waitKey(0)
@@ -576,7 +610,7 @@ def realtime_mode():
     # --- CONFIG ---
     while True:
         # Diccionario con objetos y su imagen base
-        templates_raw, templates_no_match = load_templates()
+        templates_raw = load_templates()
         # Modo debug
         img = read_screen_realtime()
         img_res = img.copy()
@@ -596,12 +630,12 @@ def realtime_mode():
         resize_templates(templates_raw, cell_width, cell_height)
 
         # Hallar una sola vez los contornos de los templates
-        contours_spike = find_spike_contours(templates_no_match["spike"])
-        contours_diamond = find_diamond_contours(templates_no_match["diamond"])
-        contours_rock = find_rock_contours(templates_no_match["rock"])
-        contours_key = find_key_contours(templates_no_match["key"])
-        contours_door = find_door_contours(templates_no_match["door"])
-        contours_fall = find_fall_contours(templates_no_match["fall"])
+        contours_spike = find_spike_contours(templates_raw["spike"])
+        contours_diamond = find_diamond_contours(templates_raw["diamond"])
+        contours_rock = find_rock_contours(templates_raw["rock"])
+        contours_key = find_key_contours(templates_raw["key"])
+        contours_door = find_door_contours(templates_raw["door"])
+        contours_fall = find_fall_contours(templates_raw["fall"])
         # ponerle nombre a las celdas
         nodes_in_game = tag_cells(img_res, img, templates_raw, contours_spike, contours_diamond, contours_rock, contours_key, contours_door, contours_fall, game_rectangle, cell_width, cell_height, rows=15, cols=10)
 
@@ -618,17 +652,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-
-class Cell:
-    def __init__(self, row, col, cell_type, walkable=True):
-        self.row = row
-        self.col = col
-        self.cell_type = cell_type
-        self.walkable = walkable
-        self.neighbor_up = None
-        self.neighbor_down = None
-        self.neighbor_left = None
-        self.neighbor_right = None
-
-    def __repr__(self):
-        return f"Cell({self.row}, {self.col}, {self.cell_type})"
