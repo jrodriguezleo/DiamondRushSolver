@@ -19,9 +19,6 @@ from skimage.metrics import structural_similarity as ssim
 # TODO crear la funcion que permita simular el juego
 # TODO recortar assets en resolucion de portatil 1366x768
 
-# TODO precomputar la distancia entre cada celda y cada celda vecina dado un game state para que seamas eficiente A*
-
-
 # TODO mirar los pesos de cada celda para ver si funciona bien
 class Cell:
     def __init__(self, row, col, cell_type):
@@ -188,22 +185,47 @@ class GameAction:
     # Los pesos deben cambiar segun el estado del juego, osea si el jugador tiene una llave o no, si la escalera esta abierta o no
     # Si hay puerta de metal que debe abrirse con un boton
     # 
-    def __init__(self):
+    def __init__(self, grid: list[list[Cell]], player_pos: tuple[int, int]):
         self.actions = [("grab-diamond", 2)]
+        self.grid = grid
+        self.player_pos = player_pos
+
+
+    # IDEALMENTE ESTAS FUNCIONES DE FIND NEAREST PRIMERO DEBEN MIRAR SI EN LA GRILLA EXISTE DICHA COSA PARA AHORRAR COMPUTO.
+    # Podria ser un solo for que recorra la grilla y busque todas las cosas al mismo tiempo diciendo si existen.
+    def check_objects_in_grid(self):
+        doorExists = False
+        keyExists = False
+        diamondExists = False
+        rockExists = False
+        for row in self.grid:
+            for cell in row:
+                if cell.cell_type == "door":
+                    doorExists = True
+                elif cell.cell_type == "key":
+                    keyExists = True
+                elif cell.cell_type == "diamond":
+                    diamondExists = True
+                elif cell.cell_type == "rock":
+                    rockExists = True
+        return doorExists, keyExists, diamondExists, rockExists
 
     def find_nearest_diamond():
+        #TODO
         # Esta funcion se encarga de encontrar el diamante mas cercano al jugador, si el peso excede un umbral
         # o no hay diamantes o vecinos caminables, entonces no se realiza esta accion
         # Se usa el algoritmo A* para encontrar el camino mas corto entre el jugador y el diamante
         pass
 
     def find_nearest_key():
+        #TODO
         # Esta funcion se encarga de encontrar la llave mas cercana al jugador, si el peso excede un umbral
         # o no hay llaves o vecinos caminables, entonces no se realiza esta accion
         # Se usa el algoritmo A* para encontrar el camino mas corto entre el jugador y la llave
         pass
 
     def find_nearest_door():
+        #TODO
         # la accion de ir a una puerta deberia tener mas peso si se tiene una llave y menos peso en caso de que no.
         # Esta funcion se encarga de encontrar la puerta mas cercana al jugador, si el peso excede un umbral
         # o no hay puertas o vecinos caminables, entonces no se realiza esta accion
@@ -211,6 +233,7 @@ class GameAction:
         pass
 
     def get_next_action(self):
+        #TODO
         # Esta funcion se encarga de devolver la siguiente accion a realizar
         # Se elige la accion con menor peso
         # Si el peso es mayor a un umbral, entonces no se realiza la accion
