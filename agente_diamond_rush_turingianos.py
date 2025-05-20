@@ -19,6 +19,10 @@ from skimage.metrics import structural_similarity as ssim
 # TODO crear la funcion que permita simular el juego
 # TODO recortar assets en resolucion de portatil 1366x768
 
+# TODO precomputar la distancia entre cada celda y cada celda vecina dado un game state para que seamas eficiente A*
+
+
+# TODO mirar los pesos de cada celda para ver si funciona bien
 class Cell:
     def __init__(self, row, col, cell_type):
         self.row = row
@@ -76,6 +80,155 @@ class Cell:
 
     def __repr__(self):
         return f"Cell({self.row}, {self.col}, {self.cell_type})"
+
+class AStar:
+    # Algoritmo A* para encontrar el camino mas corto entre dos puntos usando las celdas Cell
+    def __init__(self, start: tuple[int, int], goal: tuple[int, int], grid: list[list[Cell]]):
+        self.start = start
+        self.goal = goal
+        self.grid = grid
+        self.open_set = set()
+        self.closed_set = set()
+        self.came_from = {}
+        self.g_score = {}
+        self.f_score = {}
+        self.path = []
+    
+    def heuristic(self, a: tuple[int, int], b: tuple[int, int]) -> float:
+        # Heuristica de manhattan
+        # Util cuando solo hay 4 direcciones de movimiento
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+    
+    def reconstruct_path(self, current):
+        total_path = [current]
+        while current in self.came_from:
+            current = self.came_from[current]
+            total_path.append(current)
+        return total_path[::-1]
+
+    # Esta funcion devuelve los vecinos de una celda que son caminables
+    def get_neighbors(self, node):
+        row, col = node
+        neighbors = []
+        # Direcciones posibles: arriba, abajo, izquierda, derecha
+        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        # Para cada cambio en la direccion de fila y columna
+        for delta_row, delta_column in directions:
+            # Calcular la nueva fila y columna en base a mi delta (osea direcciones arriba, abajo, izquierda, derecha)
+            new_row, new_column = row + delta_row, col + delta_column
+            # Verificar que la nueva fila y columna esten dentro de los limites de la rejilla
+            if 0 <= new_row < len(self.grid) and 0 <= new_column < len(self.grid[0]):
+                neighbor_cell = self.grid[new_row][new_column]
+                # Agregar celda solo si es caminable y no es None
+                if neighbor_cell is not None and neighbor_cell.walkable:
+                    neighbors.append((new_row, new_column))
+        return neighbors
+
+    # Esta funcion se encarga de buscar el camino mas corto entre el punto de inicio y el punto de fin
+    def search(self):
+        self.open_set = {self.start}
+        self.g_score = {self.start: 0}
+        self.f_score = {self.start: self.heuristic(self.start, self.goal)}
+        self.came_from = {}
+
+        # Mientras haya nodos en la lista abierta
+        while self.open_set:
+            # Obtener el nodo con el menor f_score 
+            current = min(self.open_set, key=lambda x: self.f_score.get(x, float('inf')))
+            if current == self.goal:
+                self.path = self.reconstruct_path(current)
+                return self.path
+
+            # Mover el nodo actual de la lista abierta a la lista cerrada
+            self.open_set.remove(current)
+            self.closed_set.add(current)
+
+            neighbors = self.get_neighbors(current)
+            if not neighbors:
+                continue  # No walkable neighbors, path may be blocked
+
+            # Para cada vecino del nodo actual y que no esté en la lista cerrada
+            for neighbor in neighbors:
+                if neighbor in self.closed_set:
+                    continue
+                # Calcular el costo g del vecino  y sumarle el peso de la celda
+                tentative_g_score = self.g_score[current] + self.grid[neighbor[0]][neighbor[1]].weight
+                # Si el vecino no está en la lista abierta, agregarlo
+                if neighbor not in self.open_set:
+                    self.open_set.add(neighbor)
+                # Si el costo g es mayor que el costo g actual, continuar
+                elif tentative_g_score >= self.g_score.get(neighbor, float('inf')):
+                    continue
+                
+                # Actualizar el camino más corto
+                self.came_from[neighbor] = current
+                self.g_score[neighbor] = tentative_g_score
+                self.f_score[neighbor] = tentative_g_score + self.heuristic(neighbor, self.goal)
+
+        # No path found
+        self.path = []
+        return None
+
+class GameState:
+    # Esta clase se encarga de guardar el estado del juego junto ccon la lista de acciones que lo llevaron a ese estado
+    # Se considera un estado ganador si el jugador llega a la escalera abierta.
+    def __init__(self, grid: list[list[Cell]], player_pos: tuple[int, int], game_state: int, actions: list[str] = []):
+        self.grid = grid
+        self.player_pos = player_pos
+        self.game_state = game_state
+        self.actions = actions
+    
+
+
+    def __repr__(self):
+        return f"GameState({self.grid}, {self.player_pos}, {self.game_state})"
+
+class GameAction:
+    # Esta clase se encarga de guardar las posibles acciones del juego con su peso
+    # Los pesos deben cambiar segun el estado del juego, osea si el jugador tiene una llave o no, si la escalera esta abierta o no
+    # Si hay puerta de metal que debe abrirse con un boton
+    # 
+    def __init__(self):
+        self.actions = [("grab-diamond", 2)]
+
+    def find_nearest_diamond():
+        # Esta funcion se encarga de encontrar el diamante mas cercano al jugador, si el peso excede un umbral
+        # o no hay diamantes o vecinos caminables, entonces no se realiza esta accion
+        # Se usa el algoritmo A* para encontrar el camino mas corto entre el jugador y el diamante
+        pass
+
+    def find_nearest_key():
+        # Esta funcion se encarga de encontrar la llave mas cercana al jugador, si el peso excede un umbral
+        # o no hay llaves o vecinos caminables, entonces no se realiza esta accion
+        # Se usa el algoritmo A* para encontrar el camino mas corto entre el jugador y la llave
+        pass
+
+    def find_nearest_door():
+        # la accion de ir a una puerta deberia tener mas peso si se tiene una llave y menos peso en caso de que no.
+        # Esta funcion se encarga de encontrar la puerta mas cercana al jugador, si el peso excede un umbral
+        # o no hay puertas o vecinos caminables, entonces no se realiza esta accion
+        # Se usa el algoritmo A* para encontrar el camino mas corto entre el jugador y la puerta
+        pass
+
+    def get_next_action(self):
+        # Esta funcion se encarga de devolver la siguiente accion a realizar
+        # Se elige la accion con menor peso
+        # Si el peso es mayor a un umbral, entonces no se realiza la accion
+        # si no se realiza la accion, se elige la siguiente accion con menor peso en la lista de acciones
+        pass
+
+
+class DumbAgent:
+    # Este agente solo es capaz de caminar de forma random a cualquier diamante
+    def __init__(self):
+        self.game_state = None
+        self.grid = None
+    
+    def walk(self):
+        # Caminar a un diamante y esperar confirmacion visual
+        pass 
+
+
 
 def read_screen_debug(path : str) -> tuple[str, str]:
     img = cv2.imread(path, cv2.IMREAD_COLOR)
