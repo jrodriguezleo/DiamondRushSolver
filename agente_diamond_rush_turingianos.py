@@ -184,7 +184,7 @@ class GameState:
     def __repr__(self):
         return f"GameState({self.grid}, {self.player_pos}, {self.game_state})"
 
-class SimulateKeyboard:
+class KeyboardSimulator:
     # Esta clase se encarga de simular el teclado para enviar acciones al juego
     def __init__(self, game_state: GameState):
         self.actions = game_state.actions
@@ -282,6 +282,7 @@ class SmartAgent:
         # En cada paso se guarda la accion tomaada por cada estado de juego
         # Se tiene una pila de acciones en orden para ir de forma greedy a la solucion pero si no se puede hacer la accion
         # se hace la siguiente y asi, si no hay ninguna accion se considera unn camino bloqueado y se devuelve hasta el ultimo estado viable
+        # Retorna el game state donde se gana junto con sus acciones
         pass
 
 
@@ -350,6 +351,7 @@ def get_game_area(img) -> None | tuple[int, int, int, int]:
         return None
     # ---- FIN HALLAR AREA ENTRE CONTORNOS ---- #
 
+# TODO convertir todas estas funciones de Computer Vision a una clase para que este mas ordenado su uso
 # Esta funcion se encarga de crear la rejilla en la imagen editada y devuelve el tamaño de las celdas
 def create_grid(img_res: np.ndarray, game_rectangle: tuple[int, int, int, int], rows: int, cols: int) -> tuple[float, float]:
     area = (game_rectangle[2] - game_rectangle[0], game_rectangle[3] - game_rectangle[1])
@@ -886,8 +888,10 @@ def main():
     first_grid = debug_mode()
     # Simular desde la primera grilla hasta el final
     agent = SmartAgent(first_grid)
-    actions = agent.simulate()
-    
+    winner_state = agent.simulate()
+    key_simulator = KeyboardSimulator(winner_state)
+    key_simulator.execute_actions()
+    # TODO verificar si gana el nivel para hacer esto de nuevo
 
 
 if __name__ == "__main__":
