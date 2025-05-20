@@ -9,17 +9,12 @@ import pyautogui
 from skimage.metrics import structural_similarity as ssim
 
 
-# TODO crear un nodo game state para ir guardanndo los estados del juego simulados
-# TODO crear algoritmo A star
 # TODO crear acciones posibles en game state y ponerles peso
-# TODO crear heuristicac para el algoritmo A star
-# TODO poder enviar acciones al juego por medio de simulacion de teclado
-# TODO preocuparse de paralelizar la simulacion de juego
 # TODO poder simular acciones del juego de forma eficiente (no simular cada paso del pj, solo acciones en el mundo relevantes)
 # TODO crear la funcion que permita simular el juego
 # TODO recortar assets en resolucion de portatil 1366x768
 
-# TODO mirar los pesos de cada celda para ver si funciona bien
+# TODO mirar los pesos de cada celda para ver si funciona bien el A*
 class Cell:
     def __init__(self, row, col, cell_type):
         self.row = row
@@ -166,31 +161,72 @@ class AStar:
         self.path = []
         return None
 
+class GameAction:
+    # Esta clase se encarga de guardar las posibles acciones del juego. Basicamente es para que se pueda
+    # leer humanamente esto, ya que al final se traduce como moverse a x,y o empujar a alguna direccion
+    def __init__(self, action: str, coordinates: tuple[int, int] = None, path : list = []):
+        self.action = action
+        self.coordinates = coordinates
+        # El path es el camino hallado por A* para llegar a la celda
+        self.path = path
+
 class GameState:
     # Esta clase se encarga de guardar el estado del juego junto ccon la lista de acciones que lo llevaron a ese estado
-    # Se considera un estado ganador si el jugador llega a la escalera abierta.
-    def __init__(self, grid: list[list[Cell]], player_pos: tuple[int, int], game_state: int, actions: list[str] = []):
+    # Se considera un estado ganador si el jugador llega a la escalera abierta. (el agente revisa esta condicion para romper la simulacion)
+    # con player pos y ladder pos
+    # Las acciones son ir a x,y o empujar a alguna direccion
+    def __init__(self, grid: list[list[Cell]], player_pos: tuple[int, int], game_state: int, actions: list[GameAction] = []):
         self.grid = grid
         self.player_pos = player_pos
         self.game_state = game_state
         self.actions = actions
-    
-
 
     def __repr__(self):
         return f"GameState({self.grid}, {self.player_pos}, {self.game_state})"
 
-class GameAction:
-    # Esta clase se encarga de guardar las posibles acciones del juego con su peso
-    # Los pesos deben cambiar segun el estado del juego, osea si el jugador tiene una llave o no, si la escalera esta abierta o no
-    # Si hay puerta de metal que debe abrirse con un boton
-    # 
-    def __init__(self, grid: list[list[Cell]], player_pos: tuple[int, int]):
-        self.actions = [("grab-diamond", 2)]
-        self.grid = grid
-        self.player_pos = player_pos
+class SimulateKeyboard:
+    # Esta clase se encarga de simular el teclado para enviar acciones al juego
+    def __init__(self, game_state: GameState):
+        self.actions = game_state.actions
+    
+    def execute_actions(self):
+        # Ejecutar las acciones en la lista de acciones
+        for action in self.actions:
+            # Simular la accion en el juego
+            self.execute_action(action)
+        # Limpiar la lista de acciones
+        self.actions = []
+    
+    # Dado que cada accion es un ir a x,y o empujar a alguna direccion, se debe hacer un A* para encontrar el camino
+    # luego simular cada movimiento del A * en el juego
+    def execute_action(self, action: GameAction):
+        path = action.path
+        if action.action == "move":
+            # Simular el movimiento en el juego
+            for step in path:
+                # Simular el movimiento en el juego
+                self.simulate_move(step)
+                # Esperar un tiempo para que el juego procese el movimiento
+                pyautogui.sleep(1)
 
+    def simulate_move(self, step: str):
+        # Simular el movimiento en el juego
+        # Esto se hace enviando las teclas de movimiento al juego
+        # Se puede usar pyautogui o pynput para simular el teclado
+        if step == "up":
+            pyautogui.press("up")
+        elif step == "down":
+            pyautogui.press("down")
+        elif step == "left":
+            pyautogui.press("left")
+        elif step == "right":
+            pyautogui.press("right")
 
+class SmartAgent:
+    # El agente define la estrategia a seguir para resolver el juego
+    def __init__(self, game_state: GameState):
+        self.game_state = game_state
+    
     # IDEALMENTE ESTAS FUNCIONES DE FIND NEAREST PRIMERO DEBEN MIRAR SI EN LA GRILLA EXISTE DICHA COSA PARA AHORRAR COMPUTO.
     # Podria ser un solo for que recorra la grilla y busque todas las cosas al mismo tiempo diciendo si existen.
     def check_objects_in_grid(self):
@@ -240,16 +276,13 @@ class GameAction:
         # si no se realiza la accion, se elige la siguiente accion con menor peso en la lista de acciones
         pass
 
-
-class DumbAgent:
-    # Este agente solo es capaz de caminar de forma random a cualquier diamante
-    def __init__(self):
-        self.game_state = None
-        self.grid = None
-    
-    def walk(self):
-        # Caminar a un diamante y esperar confirmacion visual
-        pass 
+    def simulate(self):
+        # Esta funcion se encarga de simular el juego con un loop
+        # Se devuelve el estado del juego al lograr la meta
+        # En cada paso se guarda la accion tomaada por cada estado de juego
+        # Se tiene una pila de acciones en orden para ir de forma greedy a la solucion pero si no se puede hacer la accion
+        # se hace la siguiente y asi, si no hay ninguna accion se considera unn camino bloqueado y se devuelve hasta el ultimo estado viable
+        pass
 
 
 
@@ -346,8 +379,6 @@ def resize_templates(templates_raw, cell_width, cell_height):
     for name, template in templates_raw.items():
         templates_raw[name] = cv2.resize(template, (int(cell_width), int(cell_height)), interpolation=cv2.INTER_NEAREST)
 
-
-
 def find_spike_contours(template: list) -> list:
     # ----- Hallar ----- #
     lower_bound = np.array([0, 0, 0])  # Límite inferior del color
@@ -428,8 +459,6 @@ def find_rock_contours(template: list) -> list:
         return contours[0]
     # ----- FIN Hallar numero de contornos de spikes ----- #
 
-
-
 def find_fall_contours(template: list) -> list:
     # template to gray scale
     template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
@@ -448,7 +477,6 @@ def find_fall_contours(template: list) -> list:
     # cv2.imshow("Resultado", template)
     # cv2.waitKey(0)
     # cv2.destroyAllWindows()
-
 
 def find_key_contours(template: list) -> list:
     # ----- Hallar ----- #
@@ -480,7 +508,6 @@ def find_key_contours(template: list) -> list:
         # contours = sorted(contours, key=cv2.contourArea, reverse=True)[:1]
         return contours[0]
     # ----- FIN Hallar numero de contornos de spikes ----- #
-
 
 def find_door_contours(template: list) -> list:
     # ----- Hallar ----- #
@@ -529,7 +556,6 @@ def detect_spike(cell_roi: np.ndarray, contours_spike: list) -> bool:
             return True
     return False
 
-
 def detect_diamond(cell_roi: np.ndarray, diamond_contour: list) -> bool:
     # Color principal del diamante: en RGB 58,162, 182
     # Color secundario mas blanco: 183,222,222
@@ -545,7 +571,6 @@ def detect_diamond(cell_roi: np.ndarray, diamond_contour: list) -> bool:
         if match_score < 0.5:
             return True
     return False
-
 
 def detect_fall(cell_roi: np.ndarray, contour: list) -> bool:
     # template to gray scale
@@ -564,8 +589,6 @@ def detect_fall(cell_roi: np.ndarray, contour: list) -> bool:
         if match_score < 0.08:
             return True
     return False
-
-
 
 def detect_key(cell_roi: np.ndarray, contour: list) -> bool:
     # Color principal del diamante: en RGB 58,162, 182
@@ -615,7 +638,6 @@ def detect_rock(cell_roi: np.ndarray, rock_contour: list) -> bool:
             return True
     return False
     #return len(contours) == len(contours_spike)
-
 
 def tag_cells(img_res, img, templates_raw, contours_spike, contours_diamond, contours_rock, contours_key, contours_door, contours_fall, firstGrid, cell_width, cell_height, rows, cols):
     grid = [[None for _ in range(cols)] for _ in range(rows)]  # Inicializar la rejilla
@@ -746,7 +768,6 @@ def tag_cells(img_res, img, templates_raw, contours_spike, contours_diamond, con
     
     return grid
 
-
 def load_templates() -> tuple[dict, dict]:
     # ASSETS en tamaño full screen 1920x1080
     # TODO hacer assets en 1366x768 y probar si esas estan mejor para pantallas mas chicas... probar
@@ -820,6 +841,7 @@ def debug_mode():
     cv2.imshow("Resultado", img_res)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
+    return nodes_in_game
 
 def realtime_mode():
     # --- CONFIG ---
@@ -861,7 +883,11 @@ def realtime_mode():
 
 def main():   
     # realtime_mode()
-    debug_mode()
+    first_grid = debug_mode()
+    # Simular desde la primera grilla hasta el final
+    agent = SmartAgent(first_grid)
+    actions = agent.simulate()
+    
 
 
 if __name__ == "__main__":
