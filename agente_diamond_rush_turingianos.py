@@ -1,3 +1,7 @@
+# COMMANDS TO INSTALL DEPENDENCIES
+# pip install opencv-python
+# pip install pytautogui
+# pip install scikit-image  -> usado en skimage.metrics
 from contextlib import nullcontext
 from itertools import count
 import re
@@ -286,606 +290,448 @@ class SmartAgent:
         pass
 
 
+import cv2
+import numpy as np
+import pyautogui
+import re
+from typing import Optional, Tuple, Dict, List
 
-def read_screen_debug(path : str) -> tuple[str, str]:
-    img = cv2.imread(path, cv2.IMREAD_COLOR)
-    return img
-
-def read_screen_realtime() -> tuple[str, str]:
-    img = pyautogui.screenshot()
-    img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-    return img
-
-def get_game_area(img) -> None | tuple[int, int, int, int]:
-    # ------- HALLAR AREA ENTRE CONTORNOS ------- #
-    # color hexadecimal #10191c
-    # RGB ES 17 25 28
-    target_color = (24, 21, 13)  # Color en formato BGR DEL COLOR -1 PARA RANGO
-    target_color2 = (32, 27, 22)  # Color en formato BGR + 1 para rango
-
-    # Crear un rango de color
-    lower_bound = np.array(target_color)  # Límite inferior del color
-    upper_bound = np.array(target_color2)  # Límite superior del color
-
-    # Esta mascara filtra segun el rango de color
-    mask = cv2.inRange(img, lower_bound, upper_bound)
-    # Hallar contornos del filtro (mascara)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    # Dejar solo los 2 contornos mas grandes
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:2]
-
-    # Hallar el area entre los dos contornos y dibujarla en rojo
-    # Verificar que hay al menos dos contornos
-    if len(contours) >= 2:
-        x1 = cv2.boundingRect(contours[0])
-        x2 = cv2.boundingRect(contours[1])
-        # Reconocer que contorno esta a la izquierda y cual a la derecha
-        if x1 < x2:
-            left_contour = contours[0]
-            right_contour = contours[1]
-        else:
-            left_contour = contours[1]
-            right_contour = contours[0]
-
-        x1, y1, w1, h1 = cv2.boundingRect(left_contour)
-        x2, y2, w2, h2 = cv2.boundingRect(right_contour)
-        # Solo el area sin posicionamiento
-        area = (x2 - x1 - w1, h1)
+class DiamondRushVision:
+    def __init__(self):
+        self.templates_raw = self.load_templates()
+        self.contours_spike = None
+        self.contours_diamond = None
+        self.contours_rock = None
+        self.contours_key = None
+        self.contours_door = None
+        self.contours_fall = None
+        self.game_rectangle = None
+        self.cell_width = None
+        self.cell_height = None
         
-        if area[0] < 100 or area[1] < 100:
-            print("El área es demasiado pequeña para procesar.")
-            return None
-        else:
-            # Rectángulo delimitador del área entre los dos contornos con posicion inicial y tamaño
-            game_rectangle = (x1 + w1, y1, x2, y2+h2)
-            print("El área es lo suficientemente grande para procesar. ", game_rectangle)
-            # Debug dibujar el rectángulo en la imagen original y mostrarlo
-            #img_debug = img.copy()
-            #cv2.rectangle(img_debug, (w1, y1), (x2, y2+h2), (0, 0, 255), 1)
-            #cv2.imshow("Area del juego", img_debug)
-            #cv2.waitKey(0)
+    def read_screen_debug(self, path: str) -> np.ndarray:
+        """Read an image from file for debugging purposes."""
+        return cv2.imread(path, cv2.IMREAD_COLOR)
+    
+    def read_screen_realtime(self) -> np.ndarray:
+        """Capture the current screen in real-time."""
+        img = pyautogui.screenshot()
+        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    
+    def get_game_area(self, img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
+        """
+        Detect the game area by finding two large contours with specific colors.
+        Returns the rectangle coordinates (x1, y1, x2, y2) of the game area.
+        """
+        # Target color range for game borders (BGR format)
+        target_color = (24, 21, 13)  # Lower bound
+        target_color2 = (32, 27, 22)  # Upper bound
+        
+        # Create color range mask
+        lower_bound = np.array(target_color)
+        upper_bound = np.array(target_color2)
+        mask = cv2.inRange(img, lower_bound, upper_bound)
+        
+        # Find contours in the mask
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Keep only the two largest contours
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:2]
+        
+        if len(contours) >= 2:
+            # Determine left and right contours
+            x1 = cv2.boundingRect(contours[0])
+            x2 = cv2.boundingRect(contours[1])
+            left_contour = contours[0] if x1 < x2 else contours[1]
+            right_contour = contours[1] if x1 < x2 else contours[0]
+            
+            # Get bounding rectangles
+            x1, y1, w1, h1 = cv2.boundingRect(left_contour)
+            x2, y2, w2, h2 = cv2.boundingRect(right_contour)
+            
+            # Calculate area dimensions
+            area = (x2 - x1 - w1, h1)
+            
+            if area[0] < 100 or area[1] < 100:
+                print("Game area is too small to process.")
+                return None
+            
+            # Return game rectangle coordinates
+            game_rectangle = (x1 + w1, y1, x2, y2 + h2)
+            print("Game area detected:", game_rectangle)
             return game_rectangle
-    else:
-        print("No se encontraron suficientes contornos para calcular el área.")
-        return None
-    # ---- FIN HALLAR AREA ENTRE CONTORNOS ---- #
-
-# TODO convertir todas estas funciones de Computer Vision a una clase para que este mas ordenado su uso
-# Esta funcion se encarga de crear la rejilla en la imagen editada y devuelve el tamaño de las celdas
-def create_grid(img_res: np.ndarray, game_rectangle: tuple[int, int, int, int], rows: int, cols: int) -> tuple[float, float]:
-    area = (game_rectangle[2] - game_rectangle[0], game_rectangle[3] - game_rectangle[1])
-    cell_width = area[0] / cols
-    cell_height = area[1] / rows
-    first_x, first_y = (game_rectangle[0], game_rectangle[1])
-    print("Area: ", area)
-    print("Tamaño de celda: ", cell_width, cell_height)
-    # Dibujar rejilla
-    for i in range(cols + 1):
-        x = round(first_x + i * cell_width)  # Redondear posición x
-        pt1 = (x, round(first_y))  # Redondear posición y
-        pt2 = (x, round(first_y + rows * cell_height))  # Redondear posición y
-        cv2.line(img_res, pt1, pt2, (255, 0, 0), 1)
-
-    for j in range(rows + 1):
-        y = round(first_y + j * cell_height)  # Redondear posición y
-        pt1 = (round(first_x), y)  # Redondear posición x
-        pt2 = (round(first_x + cols * cell_width), y)  # Redondear posición x
-        cv2.line(img_res, pt1, pt2, (255, 0, 0), 1)
-
-
-    return cell_width, cell_height
-
-def resize_templates(templates_raw, cell_width, cell_height):
-    # Usar el tamaño de celda calculado para redimensionar los templates
-    for name, template in templates_raw.items():
-        templates_raw[name] = cv2.resize(template, (int(cell_width), int(cell_height)), interpolation=cv2.INTER_NEAREST)
-
-def find_spike_contours(template: list) -> list:
-    # ----- Hallar ----- #
-    lower_bound = np.array([0, 0, 0])  # Límite inferior del color
-    upper_bound = np.array([20, 20, 20])  # Límite superior del color
-    # Verificar si el template se cargó correctamente
-    if template is None:
-        print("El template 'spike' no se cargó correctamente.")
-    else:
-        # Crear una máscara binaria para el rango de color
-        mask = cv2.inRange(template, lower_bound, upper_bound)
-        # Encontrar los contornos en la máscara
-        contoursSpike, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        # Mostrar la máscara y el template con contornos
-        # template_with_contours = template.copy()
-        # cv2.drawContours(template_with_contours, contoursSpike, -1, (0, 255, 0), 2)  # Color verde para los contornos
-        # cv2.imshow("Máscara binaria", mask)
-        # cv2.imshow("Contornos en el template spike", template_with_contours)
-        # cv2.waitKey(0)
-        return contoursSpike
-    # ----- FIN Hallar numero de contornos de spikes ----- #
-
-def find_diamond_contours(template: list) -> list:
-    # ----- Hallar ----- #
-    lower_bound = np.array([90, 70, 20])  # Límite inferior del color del diamante
-    upper_bound = np.array([235, 235, 235])  # Límite superior del color del diamante
-    # Verificar si el template se cargó correctamente
-    if template is None:
-        print("El template 'diamond' no se cargó correctamente.")
-    else:
-        # Crear una máscara binaria para el rango de color
-        mask = cv2.inRange(template, lower_bound, upper_bound)
-        # Encontrar los contornos en la máscara
-        contoursDiamond, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        # result = cv2.bitwise_and(template, template, mask=mask)
-        # # Mostrar la imagen resultante
-        # cv2.imshow("Resultado", result)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
-
-        # # Mostrar la máscara y el template con contornos
-        # template_with_contours = template.copy()
-        # cv2.drawContours(template_with_contours, contoursDiamond, -1, (0, 255, 0), 2)  # Color verde para los contornos
-        # cv2.imshow("Máscara binaria", mask)
-        # cv2.imshow("Contornos en el template", template_with_contours)
-        # cv2.waitKey(0)
-        # Devuelve el uinico contorno encontrado
-        return contoursDiamond[0]
-    # ----- FIN Hallar numero de contornos de spikes ----- #
-
-def find_rock_contours(template: list) -> list:
-    # ----- Hallar ----- #
-    # Color principal roca en rgb 236, 151, 91
-    # el color secundario tira hacia al blanco
-    lower_bound = np.array([100, 100, 100])  # Límite inferior del color 
-    upper_bound = np.array([255, 255, 255])  # Límite superior del color 
-    # Verificar si el template se cargó correctamente
-    if template is None:
-        print("El template 'rock' no se cargó correctamente.")
-    else:
-        # Crear una máscara binaria para el rango de color
-        mask = cv2.inRange(template, lower_bound, upper_bound)
-        # Encontrar los contornos en la máscara
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        # result = cv2.bitwise_and(template, template, mask=mask)
-        # # Mostrar la imagen resultante
-        # cv2.imshow("Resultado", result)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
-        # print("Contornos encontrados: ", len(contours))
-        # # Mostrar la máscara y el template con contornos
-        # template_with_contours = template.copy()
-        # cv2.drawContours(template_with_contours, contours, -1, (0, 255, 0), 2)  # Color verde para los contornos
-        # cv2.imshow("Máscara binaria", mask)
-        # cv2.imshow("Contornos en el template", template_with_contours)
-        # cv2.waitKey(0)
-        # Devuelve el contorno mayor
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:1]
-        return contours[0]
-    # ----- FIN Hallar numero de contornos de spikes ----- #
-
-def find_fall_contours(template: list) -> list:
-    # template to gray scale
-    template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-    # umbral para binarizar la imagen
-    _, template_gray = cv2.threshold(template_gray, 40, 50, cv2.THRESH_BINARY_INV)
-    # encontrar contornos
-    contours, _ = cv2.findContours(template_gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:1]
-    return contours[0]
-    # cv2.imshow("Resultado", template_gray)
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
-    # # dibujar contornos
-    # cv2.drawContours(template, contours, -1, (0, 255, 0), 2)  # Color verde para los contornos
-    # # # Mostrar la imagen resultante
-    # cv2.imshow("Resultado", template)
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
-
-def find_key_contours(template: list) -> list:
-    # ----- Hallar ----- #
-    # Color principal key en rgb 23, 166, 123
-    # Casi notiene red y debe predominar azul y verde
-    lower_bound = np.array([50, 50, 10])  # Límite inferior del color 
-    upper_bound = np.array([200, 200, 40])  # Límite superior del color 
-    # Verificar si el template se cargó correctamente
-    if template is None:
-        print("El template 'key' no se cargó correctamente.")
-    else:
-        # Crear una máscara binaria para el rango de color
-        mask = cv2.inRange(template, lower_bound, upper_bound)
-        # Encontrar los contornos en la máscara
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        # result = cv2.bitwise_and(template, template, mask=mask)
-        # # Mostrar la imagen resultante
-        # cv2.imshow("Resultado", result)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
-        # print("Contornos encontrados: ", len(contours))
-        # # Mostrar la máscara y el template con contornos
-        # template_with_contours = template.copy()
-        # cv2.drawContours(template_with_contours, contours, -1, (0, 255, 0), 2)  # Color verde para los contornos
-        # cv2.imshow("Máscara binaria", mask)
-        # cv2.imshow("Contornos en el template", template_with_contours)
-        # cv2.waitKey(0)
-        # Devuelve el contorno mayor
-        # contours = sorted(contours, key=cv2.contourArea, reverse=True)[:1]
-        return contours[0]
-    # ----- FIN Hallar numero de contornos de spikes ----- #
-
-def find_door_contours(template: list) -> list:
-    # ----- Hallar ----- #
-    # Color principal key en rgb 17, 121, 87
-    # Casi notiene red y debe predominar azul y verde
-    lower_bound = np.array([50, 80, 5])  # Límite inferior del color 
-    upper_bound = np.array([109, 133, 25])  # Límite superior del color 
-    # Verificar si el template se cargó correctamente
-    if template is None:
-        print("El template 'door' no se cargó correctamente.")
-    else:
-        # Crear una máscara binaria para el rango de color
-        mask = cv2.inRange(template, lower_bound, upper_bound)
-        # Encontrar los contornos en la máscara
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        # result = cv2.bitwise_and(template, template, mask=mask)
-        # # Mostrar la imagen resultante
-        # cv2.imshow("Resultado", result)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
-        # print("Contornos encontrados: ", len(contours))
-        # # Mostrar la máscara y el template con contornos
-        # template_with_contours = template.copy()
-        # cv2.drawContours(template_with_contours, contours, -1, (0, 255, 0), 2)  # Color verde para los contornos
-        # cv2.imshow("Máscara binaria", mask)
-        # cv2.imshow("Contornos en el template", template_with_contours)
-        # cv2.waitKey(0)
-        # Devuelve el contorno mayor
-
-        return contours[0]
-    # ----- FIN Hallar numero de contornos de spikes ----- #
-
-def detect_spike(cell_roi: np.ndarray, contours_spike: list) -> bool:
-    lower_bound = np.array([0, 0, 0])
-    upper_bound = np.array([20, 20, 20])
-    mask = cv2.inRange(cell_roi, lower_bound, upper_bound)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if len(contours) == len(contours_spike):
-        contours_spike = sorted(contours_spike, key=cv2.contourArea, reverse=True)[:1]
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:1]
-        sum_score = 0
-        for i in range(len(contours_spike)):
-            match_score = cv2.matchShapes(contours_spike[i], contours[i], cv2.CONTOURS_MATCH_I1, 0.0)
-            sum_score += match_score
-        if sum_score < 3:
-            return True
-    return False
-
-def detect_diamond(cell_roi: np.ndarray, diamond_contour: list) -> bool:
-    # Color principal del diamante: en RGB 58,162, 182
-    # Color secundario mas blanco: 183,222,222
-    # Crear rango para los colores del diamante desde 58,162,182 a 183,222,222
-    lower_bound = np.array([90, 70, 20])  # Límite inferior del color del diamante
-    upper_bound = np.array([235, 235, 235])  # Límite superior del color del diamante
-    mask = cv2.inRange(cell_roi, lower_bound, upper_bound)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    # Si exactamente un contorno, entonces es un posible diamante
-    if len(contours) == 1:
-        match_score = cv2.matchShapes(diamond_contour, contours[0], cv2.CONTOURS_MATCH_I1, 0.0)
-        # Si el match es menor a 0.1, entonces es un diamante
-        if match_score < 0.5:
-            return True
-    return False
-
-def detect_fall(cell_roi: np.ndarray, contour: list) -> bool:
-    # template to gray scale
-    cell_roi_gray = cv2.cvtColor(cell_roi, cv2.COLOR_BGR2GRAY)
-    # umbral para binarizar la imagen
-    _, cell_roi_gray = cv2.threshold(cell_roi_gray, 40, 50, cv2.THRESH_BINARY_INV)
-    # encontrar contornos
-    contours, _ = cv2.findContours(cell_roi_gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-
-    if len(contours) > 1:
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:1]
-            
-        match_score = cv2.matchShapes(contour, contours[0], cv2.CONTOURS_MATCH_I1, 0.0)
-        # Si el match es menor a 0.1, entonces es un fall
-        if match_score < 0.08:
-            return True
-    return False
-
-def detect_key(cell_roi: np.ndarray, contour: list) -> bool:
-    # Color principal del diamante: en RGB 58,162, 182
-    # Color secundario mas blanco: 183,222,222
-    # Crear rango para los colores del diamante desde 58,162,182 a 183,222,222
-    lower_bound = np.array([50, 50, 10])  # Límite inferior del color 
-    upper_bound = np.array([200, 200, 40])  # Límite superior del color 
-    mask = cv2.inRange(cell_roi, lower_bound, upper_bound)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    # Si exactamente un contorno, entonces es un posible diamante
-    if len(contours) == 1:
-        match_score = cv2.matchShapes(contour, contours[0], cv2.CONTOURS_MATCH_I1, 0.0)
-        # Si el match es menor a 0.1, entonces es un diamante
-        if match_score < 0.5:
-            return True
-    return False
-    #return len(contours) == len(contours_spike)
-
-def detect_door(cell_roi: np.ndarray, contour: list) -> bool:
-    # Crear rango para los colores del diamante desde 58,162,182 a 183,222,222
-    lower_bound = np.array([50, 80, 5])  # Límite inferior del color 
-    upper_bound = np.array([109, 133, 25])  # Límite superior del color 
-    mask = cv2.inRange(cell_roi, lower_bound, upper_bound)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    # Si exactamente un contorno, entonces es un posible diamante
-    if len(contours) == 1:
-        match_score = cv2.matchShapes(contour, contours[0], cv2.CONTOURS_MATCH_I1, 0.0)
-        # Si el match es menor a 0.1, entonces es un diamante
-        if match_score < 0.5:
-            return True
-    return False
-
-def detect_rock(cell_roi: np.ndarray, rock_contour: list) -> bool:
-    # Color principal del diamante: en RGB 58,162, 182
-    # Color secundario mas blanco: 183,222,222
-    # Crear rango para los colores del diamante desde 58,162,182 a 183,222,222
-    lower_bound = np.array([100, 100, 100])  # Límite inferior del color 
-    upper_bound = np.array([255, 255, 255])  # Límite superior del color 
-    mask = cv2.inRange(cell_roi, lower_bound, upper_bound)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    # Si exactamente 5 contorno, entonces es un posible roca
-    if len(contours) == 5:
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:1]
-        match_score = cv2.matchShapes(rock_contour, contours[0], cv2.CONTOURS_MATCH_I1, 0.0)
-        # Si el match es menor a 0.1, entonces es
-        if match_score < 0.5:
-            return True
-    return False
-    #return len(contours) == len(contours_spike)
-
-def tag_cells(img_res, img, templates_raw, contours_spike, contours_diamond, contours_rock, contours_key, contours_door, contours_fall, firstGrid, cell_width, cell_height, rows, cols):
-    grid = [[None for _ in range(cols)] for _ in range(rows)]  # Inicializar la rejilla
-    # Traverse the grid and check for matches with templates
-    for i in range(rows):
-        for j in range(cols):
-            # Calcular la posición de la celda actual
-            cell_x = int(firstGrid[0] + j * cell_width)
-            cell_y = int(firstGrid[1] + i * cell_height)
-            cell_w = int(cell_width)
-            cell_h = int(cell_height)
-            # Recortar solo la celda actual de la imagen original
-            cell_roi = img[cell_y:cell_y + cell_h, cell_x:cell_x + cell_w]
-
-            match_found_by_template = False
-            for name, template in templates_raw.items():
-                # Realizar el match template
-                result = cv2.matchTemplate(cell_roi, template, cv2.TM_CCOEFF_NORMED)
-                min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-                
-                # Si el resultado supera el umbral y es el mejor hasta ahora, registrar el match
-                # TODO AJUSTAR MEJOR EL UMBRAL Y A VECES AJUSTAR EL DE LA ROCA Y EL BOTON
-                if max_val >= 0.75:
-                    print(f"{name.capitalize()} encontrado en celda ({i}, {j}) con confianza {max_val:.2f}")
-                    # Dibujar un rectángulo alrededor del match en la imagen editada
-                    bottom_right = (cell_x + cell_w, cell_y + cell_h)
-                    cv2.rectangle(img_res, (cell_x, cell_y), bottom_right, (0, 255, 0), 2)
-                    cv2.putText(img_res, name.capitalize(), (cell_x, cell_y - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 0), 1)
-                    match_found_by_template = True
-
-                    # Si el nombre termina con un numero, cortar ese numero antes de guardar el nombre enn el nodo
-                    name = re.sub(r'\d+$', '', name)
-                    grid[i][j] = Cell(cell_type = name, row = i, col = j)
-                    break
-
-            if match_found_by_template: continue
-
-            # --- Verificar si la celda tiene spikes --- #
-            if detect_spike(cell_roi, contours_spike):
-                # Si se detectan spikes, dibujar un rectángulo alrededor de la celda
-                cv2.rectangle(img_res, (cell_x, cell_y), (cell_x + cell_w, cell_y + cell_h), (0, 0, 255), 1)
-                # Poner el texto "Spike" en la celda
-                cv2.putText(img_res, "Spike", (cell_x, cell_y - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
-                name = "spike"
-                grid[i][j] = Cell(cell_type = name, row = i, col = j)
-                continue
-            
-            if detect_fall(cell_roi, contours_fall):
-                # Si se detecta un fall, dibujar un rectángulo alrededor de la celda
-                cv2.rectangle(img_res, (cell_x, cell_y), (cell_x + cell_w, cell_y + cell_h), (60, 60, 255), 1)
-                # Poner el texto "Fall" en la celda
-                cv2.putText(img_res, "Fall", (cell_x, cell_y - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (60, 60, 255), 1)
-                name = "fall"
-                grid[i][j] = Cell(cell_type = name, row = i, col = j)
-                continue
-
-            # if detect_diamond(cell_roi, contours_diamond):
-            #     # Si se detecta un diamante, dibujar un rectángulo alrededor de la celda
-            #     cv2.rectangle(img_res, (cell_x, cell_y), (cell_x + cell_w, cell_y + cell_h), (0, 255, 0), 1)
-            #     # Poner el texto "Diamond" en la celda
-            #     cv2.putText(img_res, "Diamond", (cell_x, cell_y - 10),
-            #                 cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 0), 1)
-            #     continue
-
-            # if detect_rock(cell_roi, contours_rock):
-            #     # Si se detecta una roca, dibujar un rectángulo alrededor de la celda
-            #     cv2.rectangle(img_res, (cell_x, cell_y), (cell_x + cell_w, cell_y + cell_h), (100, 100, 255), 1)
-            #     # Poner el texto "Rock" en la celda
-            #     cv2.putText(img_res, "Rock", (cell_x, cell_y - 10),
-            #                 cv2.FONT_HERSHEY_SIMPLEX, 0.35, (100, 100, 255), 1)
-            #     continue
-            
-            # if detect_key(cell_roi, contours_key):
-            #     # Si se detecta una llave, dibujar un rectángulo alrededor de la celda
-            #     cv2.rectangle(img_res, (cell_x, cell_y), (cell_x + cell_w, cell_y + cell_h), (240, 240, 240), 1)
-            #     # Poner el texto "Key" en la celda
-            #     cv2.putText(img_res, "Key", (cell_x, cell_y - 10),
-            #                 cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
-            #     continue
-            
-            # if detect_door(cell_roi, contours_door):
-            #     # Si se detecta una llave, dibujar un rectángulo alrededor de la celda
-            #     cv2.rectangle(img_res, (cell_x, cell_y), (cell_x + cell_w, cell_y + cell_h), (20, 240, 240), 1)
-            #     # Poner el texto "Door" en la celda
-            #     cv2.putText(img_res, "Door", (cell_x, cell_y - 10),
-            #                 cv2.FONT_HERSHEY_SIMPLEX, 0.35, (20, 255, 255), 1)
-            #     continue
-            
-            
-
-            # Verificar si es terreno luego de que el resto falló
-            roi_mean_color = cv2.mean(cell_roi)[:3]
-            # Verificar si el ROI coincide con el terreno basado en el color promedio
-            terrain_mean_color = cv2.mean(templates_raw["terrain"])[:3]
-            color_diff = np.linalg.norm(np.array(roi_mean_color) - np.array(terrain_mean_color))
-            color_threshold = 15  # Ajusta este valor según sea necesario
-
-            if color_diff < color_threshold:
-                print(f"terreno encontrado en celda ({i}, {j}) con confianza {color_diff:.2f}")
-
-                #  Dibujar un rectángulo alrededor del match en la imagen editada
-                bottom_right = (cell_x + cell_w, cell_y + cell_h)
-                cv2.rectangle(img_res, (cell_x, cell_y), bottom_right, (0, 120, 120), 2)
-                cv2.putText(img_res, "Terreno", (cell_x, cell_y - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 0), 1)
-                name = "terrain"
-                grid[i][j] = Cell(cell_type = name, row = i, col = j)
-            
-            #cv2.imshow("cell", cell_roi)
-            #cv2.waitKey(0)
-    
-    # Actualizar los vecinos de cada celda
-    for i in range(rows):
-        for j in range(cols):
-            cell = grid[i][j]
-            if cell is not None:
-                if i > 0:
-                    cell.neighbor_up = grid[i-1][j]
-                if i < rows - 1:
-                    cell.neighbor_down = grid[i+1][j]
-                if j > 0:
-                    cell.neighbor_left = grid[i][j-1]
-                if j < cols - 1:
-                    cell.neighbor_right = grid[i][j+1]
-    
-    return grid
-
-def load_templates() -> tuple[dict, dict]:
-    # ASSETS en tamaño full screen 1920x1080
-    # TODO hacer assets en 1366x768 y probar si esas estan mejor para pantallas mas chicas... probar
-    templates_raw = {
-        "diamond": cv2.imread("Diamond-Rush-Bot/diamond.png", cv2.IMREAD_COLOR),
-        "door": cv2.imread("Diamond-Rush-Bot/door.png", cv2.IMREAD_COLOR),
-        "fall": cv2.imread("Diamond-Rush-Bot/fall.png", cv2.IMREAD_COLOR),
-        "key": cv2.imread("Diamond-Rush-Bot/key.png", cv2.IMREAD_COLOR),
-        "ladder1": cv2.imread("Diamond-Rush-Bot/ladder.png", cv2.IMREAD_COLOR),
-        "ladder2": cv2.imread("Diamond-Rush-Bot/ladder-fs.png", cv2.IMREAD_COLOR),
-        "ladder3": cv2.imread("Diamond-Rush-Bot/ladder-pj.png", cv2.IMREAD_COLOR),
-        "ladder4": cv2.imread("Diamond-Rush-Bot/ladder-no-walls.png", cv2.IMREAD_COLOR),
-        "ladder-open1": cv2.imread("Diamond-Rush-Bot/ladder-open.png", cv2.IMREAD_COLOR),
-        "ladder-open2": cv2.imread("Diamond-Rush-Bot/ladder-open-pj.png", cv2.IMREAD_COLOR),
-        "ladder-open3": cv2.imread("Diamond-Rush-Bot/ladder-no-walls-open.png", cv2.IMREAD_COLOR),
-        "player1": cv2.imread("Diamond-Rush-Bot/player-izq.png", cv2.IMREAD_COLOR),
-        "player2": cv2.imread("Diamond-Rush-Bot/player-izq2.png", cv2.IMREAD_COLOR),
-        "player3": cv2.imread("Diamond-Rush-Bot/player-der.png", cv2.IMREAD_COLOR),
-        "player-with-key1": cv2.imread("Diamond-Rush-Bot/player-key-der.png", cv2.IMREAD_COLOR),
-        "player-with-key2": cv2.imread("Diamond-Rush-Bot/player-key-izq.png", cv2.IMREAD_COLOR),
-        "rock": cv2.imread("Diamond-Rush-Bot/rock.png", cv2.IMREAD_COLOR),
-        "rock-in-fall": cv2.imread("Diamond-Rush-Bot/rock-in-fall.png", cv2.IMREAD_COLOR),
-        "terrain": cv2.imread("Diamond-Rush-Bot/terrain.png", cv2.IMREAD_COLOR),
-        "spike": cv2.imread("Diamond-Rush-Bot/spikes.png", cv2.IMREAD_COLOR),
-        "metal-door": cv2.imread("Diamond-Rush-Bot/metal-door.png", cv2.IMREAD_COLOR),
-        "push_button": cv2.imread("Diamond-Rush-Bot/push_button.png", cv2.IMREAD_COLOR),
-        "spike-up1": cv2.imread("Diamond-Rush-Bot/spikes-up1.png", cv2.IMREAD_COLOR),
-        "spike-up2": cv2.imread("Diamond-Rush-Bot/spikes-up2.png", cv2.IMREAD_COLOR),
         
-    }
-    return templates_raw
-
-def debug_mode():
-    # --- CONFIG ---
-    # Diccionario con objetos y su imagen base
-    templates_raw = load_templates()
-    # Modo debug
-    img = read_screen_debug("Diamond-Rush-Bot/screenshots/screenshot3.png")
-    img_res = img.copy()
-    # Obtener área del juego
-    game_rectangle = get_game_area(img)
-    if game_rectangle is None:
-        print("No se pudo encontrar el área del juego.")
-        return
-
-    # Crear rejilla
-    cell_width, cell_height = create_grid(img_res, game_rectangle, rows=15, cols=10)
-
-    # Redimensionar templates
-    resize_templates(templates_raw, cell_width, cell_height)
-
-    # Hallar una sola vez los contornos de los templates
-    contours_spike = find_spike_contours(templates_raw["spike"])
-    contours_diamond = find_diamond_contours(templates_raw["diamond"])
-    contours_rock = find_rock_contours(templates_raw["rock"])
-    contours_key = find_key_contours(templates_raw["key"])
-    contours_door = find_door_contours(templates_raw["door"])
-    contours_fall = find_fall_contours(templates_raw["fall"])
-    # ponerle nombre a las celdas
-    nodes_in_game = tag_cells(img_res, img, templates_raw, contours_spike, contours_diamond, contours_rock, contours_key, contours_door, contours_fall, game_rectangle, cell_width, cell_height, rows=15, cols=10)
+        print("Not enough contours found to determine game area.")
+        return None
     
-    # Imprimir en consola los nodos encontrados de manera legible para un humano
-    for i in range(len(nodes_in_game)):
-        for j in range(len(nodes_in_game[i])):
-            if nodes_in_game[i][j] is not None:
-                print(f"Celda ({i}, {j}): {nodes_in_game[i][j].cell_type}")
-            else:
-                print(f"Celda ({i}, {j}): None")
+    def create_grid(self, img_res: np.ndarray, game_rectangle: Tuple[int, int, int, int], 
+                   rows: int, cols: int) -> Tuple[float, float]:
+        """
+        Draw a grid on the image and calculate cell dimensions.
+        Returns the width and height of each cell.
+        """
+        area_width = game_rectangle[2] - game_rectangle[0]
+        area_height = game_rectangle[3] - game_rectangle[1]
+        cell_width = area_width / cols
+        cell_height = area_height / rows
+        first_x, first_y = game_rectangle[0], game_rectangle[1]
+        
+        print(f"Game area: {area_width}x{area_height}")
+        print(f"Cell size: {cell_width}x{cell_height}")
+        
+        # Draw vertical grid lines
+        for i in range(cols + 1):
+            x = round(first_x + i * cell_width)
+            pt1 = (x, round(first_y))
+            pt2 = (x, round(first_y + rows * cell_height))
+            cv2.line(img_res, pt1, pt2, (255, 0, 0), 1)
+        
+        # Draw horizontal grid lines
+        for j in range(rows + 1):
+            y = round(first_y + j * cell_height)
+            pt1 = (round(first_x), y)
+            pt2 = (round(first_x + cols * cell_width), y)
+            cv2.line(img_res, pt1, pt2, (255, 0, 0), 1)
+        
+        return cell_width, cell_height
     
-    # Mostrar resultados
-    cv2.imshow("Resultado", img_res)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-    return nodes_in_game
-
-def realtime_mode():
-    # --- CONFIG ---
-    while True:
-        # Diccionario con objetos y su imagen base
-        templates_raw = load_templates()
-        # Modo debug
-        img = read_screen_realtime()
+    def resize_templates(self, cell_width: float, cell_height: float) -> None:
+        """Resize all templates to match the cell dimensions."""
+        for name, template in self.templates_raw.items():
+            self.templates_raw[name] = cv2.resize(
+                template, 
+                (int(cell_width), int(cell_height)), 
+                interpolation=cv2.INTER_NEAREST
+            )
+    
+    def _find_spike_contours(self) -> List:
+        """Find and return contours for spike objects."""
+        template = self.templates_raw["spike"]
+        lower_bound = np.array([0, 0, 0])
+        upper_bound = np.array([20, 20, 20])
+        mask = cv2.inRange(template, lower_bound, upper_bound)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        return contours
+    
+    def _find_diamond_contours(self) -> List:
+        """Find and return contours for diamond objects."""
+        template = self.templates_raw["diamond"]
+        lower_bound = np.array([90, 70, 20])
+        upper_bound = np.array([235, 235, 235])
+        mask = cv2.inRange(template, lower_bound, upper_bound)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        return contours[0] if contours else None
+    
+    def _find_rock_contours(self) -> List:
+        """Find and return contours for rock objects."""
+        template = self.templates_raw["rock"]
+        lower_bound = np.array([100, 100, 100])
+        upper_bound = np.array([255, 255, 255])
+        mask = cv2.inRange(template, lower_bound, upper_bound)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        return sorted(contours, key=cv2.contourArea, reverse=True)[0] if contours else None
+    
+    def _find_fall_contours(self) -> List:
+        """Find and return contours for fall objects."""
+        template = self.templates_raw["fall"]
+        template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+        _, template_gray = cv2.threshold(template_gray, 40, 50, cv2.THRESH_BINARY_INV)
+        contours, _ = cv2.findContours(template_gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        return sorted(contours, key=cv2.contourArea, reverse=True)[0] if contours else None
+    
+    def _find_key_contours(self) -> List:
+        """Find and return contours for key objects."""
+        template = self.templates_raw["key"]
+        lower_bound = np.array([50, 50, 10])
+        upper_bound = np.array([200, 200, 40])
+        mask = cv2.inRange(template, lower_bound, upper_bound)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        return contours[0] if contours else None
+    
+    def _find_door_contours(self) -> List:
+        """Find and return contours for door objects."""
+        template = self.templates_raw["door"]
+        lower_bound = np.array([50, 80, 5])
+        upper_bound = np.array([109, 133, 25])
+        mask = cv2.inRange(template, lower_bound, upper_bound)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        return contours[0] if contours else None
+    
+    def detect_spike(self, cell_roi: np.ndarray) -> bool:
+        """Check if a cell contains spikes."""
+        lower_bound = np.array([0, 0, 0])
+        upper_bound = np.array([20, 20, 20])
+        mask = cv2.inRange(cell_roi, lower_bound, upper_bound)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if len(contours) == len(self.contours_spike):
+            contours_spike = sorted(self.contours_spike, key=cv2.contourArea, reverse=True)[:1]
+            contours = sorted(contours, key=cv2.contourArea, reverse=True)[:1]
+            sum_score = sum(cv2.matchShapes(contours_spike[i], contours[i], cv2.CONTOURS_MATCH_I1, 0.0) 
+                           for i in range(len(contours_spike)))
+            return sum_score < 3
+        return False
+    
+    def detect_diamond(self, cell_roi: np.ndarray) -> bool:
+        """Check if a cell contains a diamond."""
+        lower_bound = np.array([90, 70, 20])
+        upper_bound = np.array([235, 235, 235])
+        mask = cv2.inRange(cell_roi, lower_bound, upper_bound)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if len(contours) == 1:
+            match_score = cv2.matchShapes(self.contours_diamond, contours[0], cv2.CONTOURS_MATCH_I1, 0.0)
+            return match_score < 0.5
+        return False
+    
+    def detect_rock(self, cell_roi: np.ndarray) -> bool:
+        """Check if a cell contains a rock."""
+        lower_bound = np.array([100, 100, 100])
+        upper_bound = np.array([255, 255, 255])
+        mask = cv2.inRange(cell_roi, lower_bound, upper_bound)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if len(contours) == 5:
+            contours = sorted(contours, key=cv2.contourArea, reverse=True)[:1]
+            match_score = cv2.matchShapes(self.contours_rock, contours[0], cv2.CONTOURS_MATCH_I1, 0.0)
+            return match_score < 0.5
+        return False
+    
+    def detect_fall(self, cell_roi: np.ndarray) -> bool:
+        """Check if a cell contains a fall trap."""
+        cell_roi_gray = cv2.cvtColor(cell_roi, cv2.COLOR_BGR2GRAY)
+        _, cell_roi_gray = cv2.threshold(cell_roi_gray, 40, 50, cv2.THRESH_BINARY_INV)
+        contours, _ = cv2.findContours(cell_roi_gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if len(contours) > 1:
+            contours = sorted(contours, key=cv2.contourArea, reverse=True)[:1]
+            match_score = cv2.matchShapes(self.contours_fall, contours[0], cv2.CONTOURS_MATCH_I1, 0.0)
+            return match_score < 0.08
+        return False
+    
+    def detect_key(self, cell_roi: np.ndarray) -> bool:
+        """Check if a cell contains a key."""
+        lower_bound = np.array([50, 50, 10])
+        upper_bound = np.array([200, 200, 40])
+        mask = cv2.inRange(cell_roi, lower_bound, upper_bound)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if len(contours) == 1:
+            match_score = cv2.matchShapes(self.contours_key, contours[0], cv2.CONTOURS_MATCH_I1, 0.0)
+            return match_score < 0.5
+        return False
+    
+    def detect_door(self, cell_roi: np.ndarray) -> bool:
+        """Check if a cell contains a door."""
+        lower_bound = np.array([50, 80, 5])
+        upper_bound = np.array([109, 133, 25])
+        mask = cv2.inRange(cell_roi, lower_bound, upper_bound)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if len(contours) == 1:
+            match_score = cv2.matchShapes(self.contours_door, contours[0], cv2.CONTOURS_MATCH_I1, 0.0)
+            return match_score < 0.5
+        return False
+    
+    def tag_cells(self, img_res: np.ndarray, img: np.ndarray, rows: int, cols: int) -> List[List[Optional[Cell]]]:
+        """
+        Analyze each cell in the grid and identify its content.
+        Returns a 2D grid of Cell objects.
+        """
+        grid = [[None for _ in range(cols)] for _ in range(rows)]
+        
+        for i in range(rows):
+            for j in range(cols):
+                # Calculate cell position and extract ROI
+                cell_x = int(self.game_rectangle[0] + j * self.cell_width)
+                cell_y = int(self.game_rectangle[1] + i * self.cell_height)
+                cell_w = int(self.cell_width)
+                cell_h = int(self.cell_height)
+                cell_roi = img[cell_y:cell_y + cell_h, cell_x:cell_x + cell_w]
+                
+                # Check for template matches first
+                match_found = False
+                for name, template in self.templates_raw.items():
+                    result = cv2.matchTemplate(cell_roi, template, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, _ = cv2.minMaxLoc(result)
+                    
+                    if max_val >= 0.75:
+                        # Draw rectangle and label for detected object
+                        cv2.rectangle(img_res, (cell_x, cell_y), 
+                                     (cell_x + cell_w, cell_y + cell_h), 
+                                     (0, 255, 0), 2)
+                        cv2.putText(img_res, name.capitalize(), 
+                                   (cell_x, cell_y - 10),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.35, 
+                                   (0, 255, 0), 1)
+                        
+                        # Remove any numbers from the end of the name
+                        clean_name = re.sub(r'\d+$', '', name)
+                        grid[i][j] = Cell(cell_type=clean_name, row=i, col=j)
+                        match_found = True
+                        break
+                
+                if match_found:
+                    continue
+                
+                # Check for specific objects if no template match was found
+                if self.detect_spike(cell_roi):
+                    cv2.rectangle(img_res, (cell_x, cell_y), 
+                                 (cell_x + cell_w, cell_y + cell_h), 
+                                 (0, 0, 255), 1)
+                    cv2.putText(img_res, "Spike", (cell_x, cell_y - 10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.35, 
+                               (0, 0, 255), 1)
+                    grid[i][j] = Cell(cell_type="spike", row=i, col=j)
+                    continue
+                
+                if self.detect_fall(cell_roi):
+                    cv2.rectangle(img_res, (cell_x, cell_y), 
+                                 (cell_x + cell_w, cell_y + cell_h), 
+                                 (60, 60, 255), 1)
+                    cv2.putText(img_res, "Fall", (cell_x, cell_y - 10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.35, 
+                               (60, 60, 255), 1)
+                    grid[i][j] = Cell(cell_type="fall", row=i, col=j)
+                    continue
+                
+                # Check for terrain if nothing else was detected
+                roi_mean_color = cv2.mean(cell_roi)[:3]
+                terrain_mean_color = cv2.mean(self.templates_raw["terrain"])[:3]
+                color_diff = np.linalg.norm(np.array(roi_mean_color) - np.array(terrain_mean_color))
+                
+                if color_diff < 15:  # Color threshold for terrain
+                    cv2.rectangle(img_res, (cell_x, cell_y), 
+                                 (cell_x + cell_w, cell_y + cell_h), 
+                                 (0, 120, 120), 2)
+                    cv2.putText(img_res, "Terrain", (cell_x, cell_y - 10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.35, 
+                               (0, 255, 0), 1)
+                    grid[i][j] = Cell(cell_type="terrain", row=i, col=j)
+        
+        # Update neighbors for each cell
+        for i in range(rows):
+            for j in range(cols):
+                cell = grid[i][j]
+                if cell:
+                    if i > 0:
+                        cell.neighbor_up = grid[i-1][j]
+                    if i < rows - 1:
+                        cell.neighbor_down = grid[i+1][j]
+                    if j > 0:
+                        cell.neighbor_left = grid[i][j-1]
+                    if j < cols - 1:
+                        cell.neighbor_right = grid[i][j+1]
+        
+        return grid
+    
+    def load_templates(self) -> Dict[str, np.ndarray]:
+        """Load all template images for object detection."""
+        return {
+            "diamond": cv2.imread("objects_in_game/diamond.png", cv2.IMREAD_COLOR),
+            "door": cv2.imread("objects_in_game/door.png", cv2.IMREAD_COLOR),
+            "fall": cv2.imread("objects_in_game/fall.png", cv2.IMREAD_COLOR),
+            "key": cv2.imread("objects_in_game/key.png", cv2.IMREAD_COLOR),
+            "ladder1": cv2.imread("objects_in_game/ladder.png", cv2.IMREAD_COLOR),
+            "ladder2": cv2.imread("objects_in_game/ladder-fs.png", cv2.IMREAD_COLOR),
+            "ladder3": cv2.imread("objects_in_game/ladder-pj.png", cv2.IMREAD_COLOR),
+            "ladder4": cv2.imread("objects_in_game/ladder-no-walls.png", cv2.IMREAD_COLOR),
+            "ladder-open1": cv2.imread("objects_in_game/ladder-open.png", cv2.IMREAD_COLOR),
+            "ladder-open2": cv2.imread("objects_in_game/ladder-open-pj.png", cv2.IMREAD_COLOR),
+            "ladder-open3": cv2.imread("objects_in_game/ladder-no-walls-open.png", cv2.IMREAD_COLOR),
+            "player1": cv2.imread("objects_in_game/player-izq.png", cv2.IMREAD_COLOR),
+            "player2": cv2.imread("objects_in_game/player-izq2.png", cv2.IMREAD_COLOR),
+            "player3": cv2.imread("objects_in_game/player-der.png", cv2.IMREAD_COLOR),
+            "player-with-key1": cv2.imread("objects_in_game/player-key-der.png", cv2.IMREAD_COLOR),
+            "player-with-key2": cv2.imread("objects_in_game/player-key-izq.png", cv2.IMREAD_COLOR),
+            "rock": cv2.imread("objects_in_game/rock.png", cv2.IMREAD_COLOR),
+            "rock-in-fall": cv2.imread("objects_in_game/rock-in-fall.png", cv2.IMREAD_COLOR),
+            "terrain": cv2.imread("objects_in_game/terrain.png", cv2.IMREAD_COLOR),
+            "spike": cv2.imread("objects_in_game/spikes.png", cv2.IMREAD_COLOR),
+            "metal-door": cv2.imread("objects_in_game/metal-door.png", cv2.IMREAD_COLOR),
+            "push_button": cv2.imread("objects_in_game/push_button.png", cv2.IMREAD_COLOR),
+            "spike-up1": cv2.imread("objects_in_game/spikes-up1.png", cv2.IMREAD_COLOR),
+            "spike-up2": cv2.imread("objects_in_game/spikes-up2.png", cv2.IMREAD_COLOR),
+        }
+    
+    def debug_mode(self, screenshot_path: str) -> List[List[Optional[Cell]]]:
+        """Run the vision pipeline in debug mode with a saved screenshot."""
+        img = self.read_screen_debug(screenshot_path)
         img_res = img.copy()
-        # Obtener área del juego
-        game_rectangle = get_game_area(img)
-        if game_rectangle is None:
-            print("No se pudo encontrar el área del juego.")
+        
+        # Detect game area
+        self.game_rectangle = self.get_game_area(img)
+        if not self.game_rectangle:
+            print("Failed to detect game area.")
+            return None
+        
+        # Create grid and resize templates
+        self.cell_width, self.cell_height = self.create_grid(
+            img_res, self.game_rectangle, rows=15, cols=10
+        )
+        self.resize_templates(self.cell_width, self.cell_height)
+        
+        # Find contours for all object types
+        self.contours_spike = self._find_spike_contours()
+        self.contours_diamond = self._find_diamond_contours()
+        self.contours_rock = self._find_rock_contours()
+        self.contours_key = self._find_key_contours()
+        self.contours_door = self._find_door_contours()
+        self.contours_fall = self._find_fall_contours()
+        
+        # Tag all cells in the grid
+        grid = self.tag_cells(img_res, img, rows=15, cols=10)
+        
+        # Display results
+        cv2.imshow("Resultado", img_res)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        
+        return grid
+    
+    def realtime_mode(self) -> None:
+        """Run the vision pipeline in real-time mode."""
+        while True:
+            img = self.read_screen_realtime()
+            img_res = img.copy()
+            
+            # Detect game area
+            self.game_rectangle = self.get_game_area(img)
+            if not self.game_rectangle:
+                print("Failed to detect game area.")
+                cv2.imshow("Resultado", img_res)
+                if cv2.waitKey(1) == ord('q'):
+                    break
+                continue
+            
+            # Create grid and resize templates
+            self.cell_width, self.cell_height = self.create_grid(
+                img_res, self.game_rectangle, rows=15, cols=10
+            )
+            self.resize_templates(self.cell_width, self.cell_height)
+            
+            # Find contours for all object types
+            self.contours_spike = self._find_spike_contours()
+            self.contours_diamond = self._find_diamond_contours()
+            self.contours_rock = self._find_rock_contours()
+            self.contours_key = self._find_key_contours()
+            self.contours_door = self._find_door_contours()
+            self.contours_fall = self._find_fall_contours()
+            
+            # Tag all cells in the grid
+            _ = self.tag_cells(img_res, img, rows=15, cols=10)
+            
+            # Display results
             cv2.imshow("Resultado", img_res)
             if cv2.waitKey(1) == ord('q'):
                 break
-            continue
-
-        # Crear rejilla
-        cell_width, cell_height = create_grid(img_res, game_rectangle, rows=15, cols=10)
-
-        # Redimensionar templates
-        resize_templates(templates_raw, cell_width, cell_height)
-
-        # Hallar una sola vez los contornos de los templates
-        contours_spike = find_spike_contours(templates_raw["spike"])
-        contours_diamond = find_diamond_contours(templates_raw["diamond"])
-        contours_rock = find_rock_contours(templates_raw["rock"])
-        contours_key = find_key_contours(templates_raw["key"])
-        contours_door = find_door_contours(templates_raw["door"])
-        contours_fall = find_fall_contours(templates_raw["fall"])
-        # ponerle nombre a las celdas
-        nodes_in_game = tag_cells(img_res, img, templates_raw, contours_spike, contours_diamond, contours_rock, contours_key, contours_door, contours_fall, game_rectangle, cell_width, cell_height, rows=15, cols=10)
-
-        # Mostrar resultados
-        cv2.imshow("Resultado", img_res)
-        if cv2.waitKey(1) == ord('q'):
-                break
 
 def main():   
-    # realtime_mode()
-    first_grid = debug_mode()
+    vision = DiamondRushVision()
+    first_grid = vision.debug_mode("screenshots/screenshot3.png")
+    # first_grid = vision.realtime_mode()
+    print(first_grid)
+
     # Simular desde la primera grilla hasta el final
     agent = SmartAgent(first_grid)
     winner_state = agent.simulate()
@@ -896,4 +742,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
