@@ -2,27 +2,34 @@
 # pip install opencv-python
 # pip install pytautogui
 # pip install scikit-image  -> usado en skimage.metrics
+# pip3 install pyKey
+
 from contextlib import nullcontext
 from itertools import count
 import re
 import cv2
 import numpy as np
+import copy
 from collections import deque
 import pyautogui
+from typing import Optional, Tuple, Dict, List
+
 
 from skimage.metrics import structural_similarity as ssim
-
+from pyKey import pressKey, releaseKey, press, sendSequence, showKeys
 
 # TODO crear acciones posibles en game state y ponerles peso
 # TODO poder simular acciones del juego de forma eficiente (no simular cada paso del pj, solo acciones en el mundo relevantes)
 # TODO crear la funcion que permita simular el juego
 # TODO recortar assets en resolucion de portatil 1366x768
 
+ROW = 0 
+COL = 1
+
 # TODO mirar los pesos de cada celda para ver si funciona bien el A*
 class Cell:
-    def __init__(self, row, col, cell_type):
-        self.row = row
-        self.col = col
+    def __init__(self, coordinates: Tuple[int,int], cell_type):
+        self.coordinates = coordinates
         self.cell_type = cell_type
         self.neighbor_up = None
         self.neighbor_down = None
@@ -72,98 +79,123 @@ class Cell:
             case "spike-up":
                 self.walkable = False
                 self.weight = 100000
-        
+
+    def set_neighbors(self, neighbors):
+        self.neighbor_up = None
+        self.neighbor_down = None
+        self.neighbor_left = None
+        self.neighbor_right = None
+
+        r, c = self.coordinates
+        for neighbor in neighbors:
+            if neighbor != None:
+                nr, nc = neighbor.coordinates
+                if nr == r - 1 and nc == c:
+                    self.neighbor_up = neighbor
+                elif nr == r + 1 and nc == c:
+                    self.neighbor_down = neighbor
+                elif nr == r and nc == c - 1:
+                    self.neighbor_left = neighbor
+                elif nr == r and nc == c + 1:
+                    self.neighbor_right = neighbor
 
     def __repr__(self):
-        return f"Cell({self.row}, {self.col}, {self.cell_type})"
+        return f"Cell({self.coordinates[ROW]}, {self.coordinates[COL]}, {self.cell_type})"
 
 class AStar:
-    # Algoritmo A* para encontrar el camino mas corto entre dos puntos usando las celdas Cell
-    def __init__(self, start: tuple[int, int], goal: tuple[int, int], grid: list[list[Cell]]):
+    def __init__(self, start: tuple[int, int], goal: tuple[int, int], grid: list[list['Cell']]):
         self.start = start
         self.goal = goal
         self.grid = grid
-        self.open_set = set()
-        self.closed_set = set()
-        self.came_from = {}
-        self.g_score = {}
-        self.f_score = {}
+        self.rows = len(grid)
+        self.cols = len(grid[0])
+        self.open_set = [start]
+        self.closed_set = []
+        self.g_score = [[float('inf') for _ in range(self.cols)] for _ in range(self.rows)]
+        self.f_score = [[float('inf') for _ in range(self.cols)] for _ in range(self.rows)]
+        self.came_from = [[None for _ in range(self.cols)] for _ in range(self.rows)]
+        self.total_weight = float('inf')
+        self.directions = []
         self.path = []
-    
-    def heuristic(self, a: tuple[int, int], b: tuple[int, int]) -> float:
-        # Heuristica de manhattan
-        # Util cuando solo hay 4 direcciones de movimiento
+
+    def heuristic(self, a, b) -> float:
         return abs(a[0] - b[0]) + abs(a[1] - b[1])
-    
+
     def reconstruct_path(self, current):
         total_path = [current]
-        while current in self.came_from:
-            current = self.came_from[current]
+        while self.came_from[current[0]][current[1]] is not None:
+            current = self.came_from[current[0]][current[1]]
             total_path.append(current)
         return total_path[::-1]
 
-    # Esta funcion devuelve los vecinos de una celda que son caminables
+    def path_to_directions(self, path: list[tuple[int, int]]) -> list[str]:
+        directions = []
+        for i in range(1, len(path)):
+            r1, c1 = path[i - 1]
+            r2, c2 = path[i]
+            if r2 < r1: directions.append("up")
+            elif r2 > r1: directions.append("down")
+            elif c2 < c1: directions.append("left")
+            elif c2 > c1: directions.append("right")
+        return directions
+
     def get_neighbors(self, node):
         row, col = node
         neighbors = []
-        # Direcciones posibles: arriba, abajo, izquierda, derecha
-        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
-        # Para cada cambio en la direccion de fila y columna
-        for delta_row, delta_column in directions:
-            # Calcular la nueva fila y columna en base a mi delta (osea direcciones arriba, abajo, izquierda, derecha)
-            new_row, new_column = row + delta_row, col + delta_column
-            # Verificar que la nueva fila y columna esten dentro de los limites de la rejilla
-            if 0 <= new_row < len(self.grid) and 0 <= new_column < len(self.grid[0]):
-                neighbor_cell = self.grid[new_row][new_column]
-                # Agregar celda solo si es caminable y no es None
-                if neighbor_cell is not None and neighbor_cell.walkable:
-                    neighbors.append((new_row, new_column))
+        cell : Cell = self.grid[row][col]
+        up : Cell = cell.neighbor_up
+        down : Cell = cell.neighbor_down
+        left : Cell = cell.neighbor_left
+        right : Cell = cell.neighbor_right
+        
+        if up is not None and cell.walkable:
+            neighbors.append(up.coordinates)
+        if down is not None and cell.walkable:
+            neighbors.append(down.coordinates)
+        if left is not None and cell.walkable:
+            neighbors.append(left.coordinates)
+        if right is not None and cell.walkable:
+            neighbors.append(right.coordinates)
+        
         return neighbors
 
-    # Esta funcion se encarga de buscar el camino mas corto entre el punto de inicio y el punto de fin
     def search(self):
-        self.open_set = {self.start}
-        self.g_score = {self.start: 0}
-        self.f_score = {self.start: self.heuristic(self.start, self.goal)}
-        self.came_from = {}
+        self.g_score[self.start[0]][self.start[1]] = 0
+        self.f_score[self.start[0]][self.start[1]] = self.heuristic(self.start, self.goal)
 
-        # Mientras haya nodos en la lista abierta
         while self.open_set:
-            # Obtener el nodo con el menor f_score 
-            current = min(self.open_set, key=lambda x: self.f_score.get(x, float('inf')))
-            if current == self.goal:
+            current = min(self.open_set, key=lambda x: self.f_score[x[0]][x[1]])
+
+            if current[0] == self.goal[0] and current[1] == self.goal[1]:
                 self.path = self.reconstruct_path(current)
-                return self.path
+                self.total_weight = self.g_score[current[0]][current[1]]
+                self.directions = self.path_to_directions(self.path)
+                return {
+                    "path": self.path,
+                    "total_weight": self.total_weight,
+                    "directions": self.directions
+                }
 
-            # Mover el nodo actual de la lista abierta a la lista cerrada
             self.open_set.remove(current)
-            self.closed_set.add(current)
+            self.closed_set.append(current)
 
-            neighbors = self.get_neighbors(current)
-            if not neighbors:
-                continue  # No walkable neighbors, path may be blocked
-
-            # Para cada vecino del nodo actual y que no esté en la lista cerrada
-            for neighbor in neighbors:
+            for neighbor in self.get_neighbors(current):
                 if neighbor in self.closed_set:
                     continue
-                # Calcular el costo g del vecino  y sumarle el peso de la celda
-                tentative_g_score = self.g_score[current] + self.grid[neighbor[0]][neighbor[1]].weight
-                # Si el vecino no está en la lista abierta, agregarlo
+
+                tentative_g = self.g_score[current[0]][current[1]] + self.grid[neighbor[0]][neighbor[1]].weight
+
                 if neighbor not in self.open_set:
-                    self.open_set.add(neighbor)
-                # Si el costo g es mayor que el costo g actual, continuar
-                elif tentative_g_score >= self.g_score.get(neighbor, float('inf')):
+                    self.open_set.append(neighbor)
+                elif tentative_g >= self.g_score[neighbor[0]][neighbor[1]]:
                     continue
                 
-                # Actualizar el camino más corto
-                self.came_from[neighbor] = current
-                self.g_score[neighbor] = tentative_g_score
-                self.f_score[neighbor] = tentative_g_score + self.heuristic(neighbor, self.goal)
+                self.came_from[neighbor[0]][neighbor[1]] = current
+                self.g_score[neighbor[0]][neighbor[1]] = tentative_g
+                self.f_score[neighbor[0]][neighbor[1]] = tentative_g + self.heuristic(neighbor, self.goal)
 
-        # No path found
-        self.path = []
         return None
+
 
 class GameAction:
     # Esta clase se encarga de guardar las posibles acciones del juego. Basicamente es para que se pueda
@@ -173,89 +205,82 @@ class GameAction:
         self.coordinates = coordinates
         # El path es el camino hallado por A* para llegar a la celda
         self.path = path
+    
+    def get_readable(self):
+        return self.action + " en " + str(self.coordinates) + " camino "  + str(self.path)
 
 class GameState:
     # Esta clase se encarga de guardar el estado del juego junto ccon la lista de acciones que lo llevaron a ese estado
     # Se considera un estado ganador si el jugador llega a la escalera abierta. (el agente revisa esta condicion para romper la simulacion)
     # con player pos y ladder pos
     # Las acciones son ir a x,y o empujar a alguna direccion
-    def __init__(self, grid: list[list[Cell]], player_pos: tuple[int, int], game_state: int, actions: list[GameAction] = []):
+    def __init__(self, grid: List[List[Cell | None]], player_pos: tuple[int, int], game_state: int, action_history: list[GameAction] = []):
         self.grid = grid
         self.player_pos = player_pos
         self.game_state = game_state
-        self.actions = actions
+        self.action_history = action_history
+        self.check_objects_in_grid()
+        # Las acciones van en orden de peso
+        self.actions = ["go_ladder","get_diamond", "get_key" ]
 
-    def __repr__(self):
-        return f"GameState({self.grid}, {self.player_pos}, {self.game_state})"
-
-class KeyboardSimulator:
-    # Esta clase se encarga de simular el teclado para enviar acciones al juego
-    def __init__(self, game_state: GameState):
-        self.actions = game_state.actions
-    
-    def execute_actions(self):
-        # Ejecutar las acciones en la lista de acciones
-        for action in self.actions:
-            # Simular la accion en el juego
-            self.execute_action(action)
-        # Limpiar la lista de acciones
-        self.actions = []
-    
-    # Dado que cada accion es un ir a x,y o empujar a alguna direccion, se debe hacer un A* para encontrar el camino
-    # luego simular cada movimiento del A * en el juego
-    def execute_action(self, action: GameAction):
-        path = action.path
-        if action.action == "move":
-            # Simular el movimiento en el juego
-            for step in path:
-                # Simular el movimiento en el juego
-                self.simulate_move(step)
-                # Esperar un tiempo para que el juego procese el movimiento
-                pyautogui.sleep(1)
-
-    def simulate_move(self, step: str):
-        # Simular el movimiento en el juego
-        # Esto se hace enviando las teclas de movimiento al juego
-        # Se puede usar pyautogui o pynput para simular el teclado
-        if step == "up":
-            pyautogui.press("up")
-        elif step == "down":
-            pyautogui.press("down")
-        elif step == "left":
-            pyautogui.press("left")
-        elif step == "right":
-            pyautogui.press("right")
-
-class SmartAgent:
-    # El agente define la estrategia a seguir para resolver el juego
-    def __init__(self, game_state: GameState):
-        self.game_state = game_state
-    
-    # IDEALMENTE ESTAS FUNCIONES DE FIND NEAREST PRIMERO DEBEN MIRAR SI EN LA GRILLA EXISTE DICHA COSA PARA AHORRAR COMPUTO.
-    # Podria ser un solo for que recorra la grilla y busque todas las cosas al mismo tiempo diciendo si existen.
     def check_objects_in_grid(self):
-        doorExists = False
-        keyExists = False
-        diamondExists = False
-        rockExists = False
+        doorExists, keyExists, diamondExists, rockExists = False, False, False, False
         for row in self.grid:
             for cell in row:
-                if cell.cell_type == "door":
-                    doorExists = True
-                elif cell.cell_type == "key":
-                    keyExists = True
-                elif cell.cell_type == "diamond":
-                    diamondExists = True
-                elif cell.cell_type == "rock":
-                    rockExists = True
-        return doorExists, keyExists, diamondExists, rockExists
+                if cell != None:
+                    if cell.cell_type == "door":
+                        doorExists = True
+                    elif cell.cell_type == "key":
+                        keyExists = True
+                    elif cell.cell_type == "diamond":
+                        diamondExists = True
+                    elif cell.cell_type == "rock":
+                        rockExists = True
+        self.doorExist, self.keyExist, self.diamondExist, self.rockExist = doorExists, keyExists, diamondExists, rockExists
 
-    def find_nearest_diamond():
-        #TODO
+    def find_nearest_diamond(self):
         # Esta funcion se encarga de encontrar el diamante mas cercano al jugador, si el peso excede un umbral
         # o no hay diamantes o vecinos caminables, entonces no se realiza esta accion
         # Se usa el algoritmo A* para encontrar el camino mas corto entre el jugador y el diamante
-        pass
+        # Debe decir si se pasa encima de un spike (o tomar el spike como otra accion)
+        best = None
+        best_score = float('inf')
+        path = None
+        player_position = self.player_pos
+        for row in self.grid:
+            for cell in row:
+                if cell != None:
+                    if cell.cell_type == "diamond":
+                        Astar = AStar(start = player_position, 
+                                    goal = cell.coordinates,
+                                    grid = self.grid)
+                        Astar.search() 
+                        # Si el peso es el minimo, actualizar mejor, si es inwalkeable, none
+                        if Astar.total_weight < best_score:
+                            best_score = Astar.total_weight
+                            best = cell
+                            path = Astar.directions
+        return best, path
+    
+    def go_ladder(self):
+        best = None
+        best_score = float('inf')
+        path = None
+        player_position = self.player_pos
+        for row in self.grid:
+            for cell in row:
+                if cell != None:
+                    if cell.cell_type == "ladder":
+                        Astar = AStar(start = player_position, 
+                                    goal = cell.coordinates,
+                                    grid = self.grid)
+                        Astar.search() 
+                        # Si el peso es el minimo, actualizar mejor, si es inwalkeable, none
+                        if Astar.total_weight < best_score:
+                            best_score = Astar.total_weight
+                            best = cell
+                            path = Astar.directions
+        return best, path
 
     def find_nearest_key():
         #TODO
@@ -273,12 +298,101 @@ class SmartAgent:
         pass
 
     def get_next_action(self):
-        #TODO
-        # Esta funcion se encarga de devolver la siguiente accion a realizar
-        # Se elige la accion con menor peso
-        # Si el peso es mayor a un umbral, entonces no se realiza la accion
-        # si no se realiza la accion, se elige la siguiente accion con menor peso en la lista de acciones
-        pass
+        if len(self.actions) > 0:
+            next_action = self.actions.pop(0)
+        else:
+            return GameAction("None",[0,0], path=[])
+        while next_action != None:
+            match next_action:
+                case "get_diamond":
+                    if self.diamondExist:
+                        nearest, path = self.find_nearest_diamond()
+                        if nearest != None:
+                            # Devuelve la accion mas coordenada donde acaba el player
+                            return GameAction(next_action, coordinates = nearest.coordinates,
+                                              path = path)
+                case "go_ladder":
+                    if not self.diamondExist:
+                        nearest, path = self.go_ladder()
+                        if nearest != None:
+                            # Devuelve la accion mas coordenada donde acaba el player
+                            return GameAction(next_action, coordinates = nearest.coordinates,
+                                              path = path)
+            # Si la accion anterior se intento pero no hubo posibilidad, busca la siguiente
+            if len(self.actions)>0:
+                next_action = self.actions.pop(0)
+            else:
+                return GameAction("None",[0,0], path=[])
+
+
+
+    def clone(self):
+        grid_clone = copy.deepcopy(self.grid)
+        player_pos_clone = copy.deepcopy(self.player_pos)
+        game_state_clone = self.game_state  # int, no necesita deepcopy
+        actions_clone = copy.deepcopy(self.action_history)
+
+        return GameState(grid_clone, player_pos_clone, game_state_clone, actions_clone)
+
+
+    def __repr__(self):
+        return f"GameState({self.grid}, {self.player_pos}, {self.game_state})"
+
+class KeyboardSimulator:
+    # Esta clase se encarga de simular el teclado para enviar acciones al juego
+    def __init__(self, game_state: GameState):
+        self.actions = game_state.action_history
+    
+    def execute_actions(self):
+        total_path = []
+        # Ejecutar las acciones en la lista de acciones
+        for action in self.actions:
+            for th in action.path:
+                total_path.append(th)
+        # Limpiar la lista de acciones
+        self.actions = []
+        print("Lista completa de pasos a seguir")
+        print(total_path)
+        for step in total_path:
+            # Simular el movimiento en el juego
+            self.simulate_move(step)
+            # Esperar un tiempo para que el juego procese el movimiento
+            pyautogui.sleep(0.5)
+    
+    # Dado que cada accion es un ir a x,y o empujar a alguna direccion, se debe hacer un A* para encontrar el camino
+    # luego simular cada movimiento del A * en el juego
+    def execute_action(self, action: GameAction):
+        path = action.path
+        # Simular el movimiento en el juego
+        for step in path:
+            # Simular el movimiento en el juego
+            self.simulate_move(step)
+            # Esperar un tiempo para que el juego procese el movimiento
+            pyautogui.sleep(1.5)
+
+    def simulate_move(self, step: str):
+        # Simular el movimiento en el juego
+        # Esto se hace enviando las teclas de movimiento al juego
+        # Se puede usar pyautogui o pynput para simular el teclado
+        if step == "up":
+            press("UP",0.2)
+        elif step == "down":
+            press("DOWN",0.2)
+        elif step == "left":
+            press("LEFT",0.2)
+        elif step == "right":
+            press("RIGHT",0.2)
+
+class SmartAgent:
+    # El agente define la estrategia a seguir para resolver el juego
+    def __init__(self, first_grid : List[List[Cell | None]]):
+        for row in range(0,len(first_grid)):
+            for col in range(0,len(first_grid[row])):
+                if first_grid[row][col] != None and first_grid[row][col].cell_type=="player":
+                    player_pos = [row, col]
+        game_state = GameState(first_grid, player_pos, 0, [])
+        self.game_state = game_state
+        
 
     def simulate(self):
         # Esta funcion se encarga de simular el juego con un loop
@@ -287,14 +401,85 @@ class SmartAgent:
         # Se tiene una pila de acciones en orden para ir de forma greedy a la solucion pero si no se puede hacer la accion
         # se hace la siguiente y asi, si no hay ninguna accion se considera unn camino bloqueado y se devuelve hasta el ultimo estado viable
         # Retorna el game state donde se gana junto con sus acciones
-        pass
 
+        state_stack : deque = []
+        simulated_game_state : GameState = self.game_state
+        simulated_action : GameAction = simulated_game_state.get_next_action()
+        while True:
+            match simulated_action.action:
+                case "get_diamond":
+                    # Mover pj al diamante, quitar diamante de la grilla.
+                    # Solo si no pasó por spikes
+                    next_state : GameState = simulated_game_state.clone()
+                    
+                    next_state.game_state += 1
+                    # TODO  # Puede que haga falta crear uno de personaje in spike.. o manejar el player pos, sin ponerll como cell.
+                    # Se borra el diamante y se cambia a terrain
+                    new_terrain = Cell(
+                        coordinates=simulated_action.coordinates, 
+                        cell_type="terrain"
+                    )
 
-import cv2
-import numpy as np
-import pyautogui
-import re
-from typing import Optional, Tuple, Dict, List
+                    # Se colocan sus vecinos de nuevo manualmente
+                    r, c = simulated_action.coordinates
+                    neighbors = []
+                    for dr, dc in [(-1,0), (1,0), (0,-1), (0,1)]:
+                        nr, nc = r + dr, c + dc
+                        if 0 <= nr < len(next_state.grid) and 0 <= nc < len(next_state.grid[0]):
+                            neighbors.append(next_state.grid[nr][nc])
+                    new_terrain.set_neighbors(neighbors)
+
+                    # Se coloca la nueva celda en la grilla
+                    next_state.grid[r][c] = new_terrain
+
+                    # Se borra el personaje y se cambia a terrain
+                    pr, pc = simulated_game_state.player_pos
+                    player_replaced = Cell(
+                        coordinates=simulated_game_state.player_pos, 
+                        cell_type="terrain"
+                    )
+
+                    # Se colocan denuevo sus vecinos
+                    player_neighbors = []
+                    for dr, dc in [(-1,0), (1,0), (0,-1), (0,1)]:
+                        nr, nc = pr + dr, pc + dc
+                        if 0 <= nr < len(next_state.grid) and 0 <= nc < len(next_state.grid[0]):
+                            player_neighbors.append(next_state.grid[nr][nc])
+                    player_replaced.set_neighbors(player_neighbors)
+
+                    # Se actualiza en la grilla
+                    next_state.grid[pr][pc] = player_replaced
+
+                    # Se actualiza player pos
+                    next_state.player_pos = simulated_action.coordinates
+
+                    simulated_game_state = next_state
+                    
+                    # Añadir accion anterior
+                    simulated_game_state.action_history.append(simulated_action)
+                    # Actualizar lo que hay en exists
+                    simulated_game_state.check_objects_in_grid()
+
+                    state_stack.append(next_state)
+                    print("Llego a nuevo estado get diamond")
+                case "go_ladder":
+                    next_state : GameState = simulated_game_state.clone()
+                    next_state.game_state += 1
+                    simulated_game_state = next_state
+                    # Añadir accion anterior
+                    simulated_game_state.action_history.append(simulated_action)
+                    state_stack.append(next_state)
+                    break
+                case "None":
+                    if len(state_stack) > 0:
+                        simulated_game_state = state_stack.pop()
+                        print("Me devolvi un estado")
+                    else:
+                        print("No hay mas game state, no encontre la solucion")
+                        break
+            simulated_action : GameAction = simulated_game_state.get_next_action()
+        print("Se encontró simulacion hasta go ladder")
+        return simulated_game_state
 
 class DiamondRushVision:
     def __init__(self):
@@ -567,7 +752,7 @@ class DiamondRushVision:
                         
                         # Remove any numbers from the end of the name
                         clean_name = re.sub(r'\d+$', '', name)
-                        grid[i][j] = Cell(cell_type=clean_name, row=i, col=j)
+                        grid[i][j] = Cell(cell_type=clean_name, coordinates=[i,j])
                         match_found = True
                         break
                 
@@ -607,7 +792,7 @@ class DiamondRushVision:
                     cv2.putText(img_res, "Terrain", (cell_x, cell_y - 10),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.35, 
                                (0, 255, 0), 1)
-                    grid[i][j] = Cell(cell_type="terrain", row=i, col=j)
+                    grid[i][j] = Cell(cell_type="terrain", coordinates = [i,j])
         
         # Update neighbors for each cell
         for i in range(rows):
@@ -689,8 +874,9 @@ class DiamondRushVision:
         
         return grid
     
-    def realtime_mode(self) -> None:
+    def realtime_mode(self, show_image = False) -> None:
         """Run the vision pipeline in real-time mode."""
+        grid = []
         while True:
             img = self.read_screen_realtime()
             img_res = img.copy()
@@ -699,11 +885,13 @@ class DiamondRushVision:
             self.game_rectangle = self.get_game_area(img)
             if not self.game_rectangle:
                 print("Failed to detect game area.")
-                cv2.imshow("Resultado", img_res)
-                if cv2.waitKey(1) == ord('q'):
-                    break
+                pyautogui.sleep(1)
+                #if show_image:
+                #    cv2.imshow("Resultado", img_res)
+                #    if cv2.waitKey(1) == ord('q'):
+                #        break
                 continue
-            
+            pyautogui.sleep(1)
             # Create grid and resize templates
             self.cell_width, self.cell_height = self.create_grid(
                 img_res, self.game_rectangle, rows=15, cols=10
@@ -719,28 +907,34 @@ class DiamondRushVision:
             self.contours_fall = self._find_fall_contours()
             
             # Tag all cells in the grid
-            _ = self.tag_cells(img_res, img, rows=15, cols=10)
+            grid = self.tag_cells(img_res, img, rows=15, cols=10)
             
             # Display results
-            cv2.imshow("Resultado", img_res)
-            if cv2.waitKey(1) == ord('q'):
+            if show_image:
+                cv2.imshow("Resultado", img_res)
                 break
+            else:
+                return grid
+        
+        if cv2.waitKey():
+            cv2.destroyAllWindows()
+            pyautogui.sleep(2)
+            return grid
 
 def main():   
     vision = DiamondRushVision()
-    first_grid = vision.debug_mode("screenshots/screenshot3.png")
-    # first_grid = vision.realtime_mode()
-    print(first_grid)
+    # first_grid = vision.debug_mode("screenshots/screenshot14.png")
+    first_grid = vision.realtime_mode(True)
+    # print(first_grid)
 
     # Simular desde la primera grilla hasta el final
     agent = SmartAgent(first_grid)
-    winner_state = agent.simulate()
+    winner_state : GameState = agent.simulate()
+    for i in winner_state.action_history:
+        print(i.get_readable())
     key_simulator = KeyboardSimulator(winner_state)
     key_simulator.execute_actions()
     # TODO verificar si gana el nivel para hacer esto de nuevo
 
-
 if __name__ == "__main__":
     main()
-
-
