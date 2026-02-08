@@ -1,0 +1,5 @@
+COMMANDS TO INSTALL DEPENDENCIES
+pip install opencv-python
+pip install pytautogui
+pip install scikit-image  # usado en skimage.metrics
+pip3 install pyKey
