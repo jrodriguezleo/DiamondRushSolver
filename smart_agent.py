@@ -44,7 +44,8 @@ class SmartAgent:
                     next_state : GameState = simulated_game_state.clone()
                     
                     next_state.game_state += 1
-                    # TODO  # Puede que haga falta crear uno de personaje in spike.. o manejar el player pos, sin ponerll como cell.
+                    # TODO Puede que haga falta crear un estado de personaje in spike.. o manejar el player pos, sin ponerlo como cell.
+                    
                     # Se borra el diamante y se cambia a terrain
                     new_terrain = Cell(
                         coordinates=simulated_action.coordinates, 

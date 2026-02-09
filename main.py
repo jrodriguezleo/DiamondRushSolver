@@ -4,9 +4,6 @@ from keyboard_simulator import KeyboardSimulator
 from game_state import GameState
 import asyncio
 
-# TODO crear acciones posibles en game state y ponerles peso
-# TODO poder simular acciones del juego de forma eficiente (no simular cada paso del pj, solo acciones en el mundo relevantes)
-# TODO crear la funcion que permita simular el juego
 # TODO recortar assets en resolucion de portatil 1366x768
 
 def main():

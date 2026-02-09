@@ -4,6 +4,10 @@ from game_action import GameAction
 from a_star import AStar
 from collections import deque
 
+#TODO fix this rock simulation.
+# Está devolviendo un path incorrecto
+# Es posible que la logica esté bien pero esté mal el como devuelve el camino correcto
+
 class RockSimulation:
     def __init__(self, grid, player_pos, rock_pos, target_pos):
         self.grid = copy.deepcopy(grid)  # Esta grilla estara actualizada al finalizar la simulacion
