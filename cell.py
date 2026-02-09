@@ -2,7 +2,6 @@ from typing import Tuple
 
 class Cell:
     def __init__(self, coordinates: Tuple[int,int], cell_type):
-        self.row, self.col = coordinates
         self.coordinates = coordinates
         self.cell_type = cell_type
         self.neighbor_up = None
@@ -73,4 +72,4 @@ class Cell:
                     self.neighbor_right = neighbor
 
     def __repr__(self):
-        return f"Cell({self.coordinates[self.row]}, {self.coordinates[self.col]}, {self.cell_type})"
+        return f"Cell({self.coordinates[0]}, {self.coordinates[1]}, {self.cell_type})"

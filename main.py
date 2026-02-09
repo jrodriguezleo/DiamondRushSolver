@@ -15,9 +15,12 @@ def main():
 
         # first_grid = vision.debug_mode("screenshots/screenshot18.png")
         
-        first_grid = vision.realtime_mode(True)
+        first_grid = vision.realtime_mode(show_image=True)
         # Simular desde la primera grilla hasta el final
         agent = SmartAgent(first_grid)
+        # Debug
+        print("Grid inicial capturado, iniciando simulacion del agente...")
+        print(first_grid)
         if agent.game_state is None:
             continue
         else:

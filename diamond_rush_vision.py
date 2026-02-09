@@ -313,7 +313,7 @@ class DiamondRushVision:
                     cv2.putText(img_res, "Fall", (cell_x, cell_y - 10),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.35, 
                                (60, 60, 255), 1)
-                    grid[i][j] = Cell(cell_type="fall", row=i, col=j)
+                    grid[i][j] = Cell(cell_type="fall", coordinates=[i,j])
                     continue
                 
                 # Check for terrain if nothing else was detected
@@ -321,7 +321,7 @@ class DiamondRushVision:
                 terrain_mean_color = cv2.mean(self.templates_raw["terrain"])[:3]
                 color_diff = np.linalg.norm(np.array(roi_mean_color) - np.array(terrain_mean_color))
                 
-                if color_diff < 15:  # Color threshold for terrain
+                if color_diff < 25:  # Color threshold for terrain
                     cv2.rectangle(img_res, (cell_x, cell_y), 
                                  (cell_x + cell_w, cell_y + cell_h), 
                                  (0, 120, 120), 2)
