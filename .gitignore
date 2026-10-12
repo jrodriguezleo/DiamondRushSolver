@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+*.pyc
+mi_captura.png
+captura_juego.png
+.DS_Store
