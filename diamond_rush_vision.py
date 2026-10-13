@@ -353,6 +353,7 @@ class DiamondRushVision:
             "door": cv2.imread("objects_in_game/door.png", cv2.IMREAD_COLOR),
             "fall": cv2.imread("objects_in_game/fall.png", cv2.IMREAD_COLOR),
             "key": cv2.imread("objects_in_game/key.png", cv2.IMREAD_COLOR),
+            "totem": cv2.imread("objects_in_game/totem.png", cv2.IMREAD_COLOR),  # nivel 20: totem dorado = salida
             "ladder1": cv2.imread("objects_in_game/ladder.png", cv2.IMREAD_COLOR),
             "ladder2": cv2.imread("objects_in_game/ladder-fs.png", cv2.IMREAD_COLOR),
             "ladder3": cv2.imread("objects_in_game/ladder-pj.png", cv2.IMREAD_COLOR),
