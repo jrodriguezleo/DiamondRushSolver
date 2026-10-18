@@ -6,3 +6,4 @@ captura_juego.png
 .DS_Store
 main_anterior.py
 historial_intentos.jsonl
+.venv/
