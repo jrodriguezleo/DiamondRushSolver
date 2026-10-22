@@ -20,7 +20,6 @@ Hasta ahora ha completado los **niveles 1 a 20** en el juego real, encadenados c
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Estado](#estado)
 - [Limitaciones](#limitaciones)
-- [Demo](#demo)
 
 ## Cómo funciona
 
@@ -154,8 +153,3 @@ Código heredado del agente codicioso original, que `main.py` ya no usa (se mant
 - Solo se ha probado en macOS con pantalla Retina.
 - El repositorio no incluye un archivo `LICENSE`. Antes de redistribuir el código conviene revisar la licencia del proyecto original.
 
-## Demo
-
-Demo del proyecto original (agente codicioso):
-
-[![Ver la demo en YouTube](https://img.shields.io/badge/YouTube-Ver%20demo-red?logo=youtube)](https://youtu.be/J1k1kEa-UyU)
