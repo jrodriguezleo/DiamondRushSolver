@@ -4,6 +4,7 @@ import numpy as np
 import pyautogui
 from typing import Optional, Tuple, Dict, List
 from cell import Cell
+from captura import capturar
 
 class DiamondRushVision:
     def __init__(self):
@@ -24,8 +25,7 @@ class DiamondRushVision:
     
     def read_screen_realtime(self) -> np.ndarray:
         """Capture the current screen in real-time."""
-        img = pyautogui.screenshot()
-        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        return capturar()  # Quartz (rapido) con respaldo en pyautogui, ver captura.py
     
     def get_game_area(self, img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
         """
@@ -411,24 +411,27 @@ class DiamondRushVision:
         
         return grid
     
-    def realtime_mode(self, show_image = False) -> None:
-        """Run the vision pipeline in real-time mode."""
+    def realtime_mode(self, show_image = False, img = None) -> None:
+        """Run the vision pipeline in real-time mode.
+        `img`: captura ya hecha (p. ej. la de enfoque.preparar) para no capturar otra vez."""
         grid = []
         while True:
-            img = self.read_screen_realtime()
+            if img is None:
+                img = self.read_screen_realtime()
             img_res = img.copy()
             
             # Detect game area
             self.game_rectangle = self.get_game_area(img)
             if not self.game_rectangle:
                 print("Failed to detect game area.")
-                pyautogui.sleep(1)
+                img = None
+                pyautogui.sleep(0.3)
                 # if show_image:
                 #    cv2.imshow("Resultado", img_res)
                 #    if cv2.waitKey(1) == ord('q'):
                 #        break
                 continue
-            pyautogui.sleep(1)
+            # (antes habia aqui un sleep(1) que no servia: la imagen ya estaba capturada)
             # Create grid and resize templates
             self.cell_width, self.cell_height = self.create_grid(
                 img_res, self.game_rectangle, rows=15, cols=10

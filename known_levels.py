@@ -318,7 +318,13 @@ _KNOWN_DOC = {
 #.ORR#...#
 #R...#.R.#
 ##########""", solution="LLLDDDDUULLUURRRURDDDDDRRULDLLLUULLURURDDUURRDDDRDLLLLRRRUUUULLDDDUUURRDDDDLLLLLD",
-        usar_guardado=True),
+        usar_guardado=True,
+        # Solo estas casillas se toman del mapa guardado (la vision ve el hoyo (0,1) como suelo y el (6,1)
+        # como pincho); el resto, jugador y rocas incluidos, se toma de la pantalla.
+        casillas_guardadas=[(0, 1), (6, 1)],
+        # Si hay que buscar ruta (jugador fuera de la casilla inicial), A* ponderado de peso 10 directamente:
+        # ~1 s frente a ~90 s probando antes el A* exacto y los pesos 2 y 5. --peso W lo sustituye.
+        peso=10),
 }
 
 # Numeracion: las claves de KNOWN son el numero que muestra la cabecera del juego (HUD). En el documento original

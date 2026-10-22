@@ -35,7 +35,7 @@ Hasta ahora ha completado los **niveles 1 a 20** en el juego real, encadenados c
 
 - **Python 3.10 o superior** (el código usa `match` y `X | None`).
 - **macOS**. Se desarrolló y probó en un MacBook con pantalla Retina; `requirements.txt` incluye `pyobjc`.
-- Permisos de macOS para la app de terminal: **Accesibilidad** (enviar teclas) y **Grabación de pantalla** (capturas). Tras concederlos, cierra la app con ⌘+Q y ábrela de nuevo.
+- Permisos de macOS para la app de terminal: **Accesibilidad** (enviar teclas) y **Grabación de pantalla** (capturas). Tras concederlos, cierra la app con ⌘+Q y ábrela de nuevo. La primera vez que el bot trae el navegador al frente, macOS pide además permiso de **Automatización** (la terminal controla el navegador).
 
 ## Instalación
 
@@ -51,7 +51,7 @@ Si mueves o renombras la carpeta, recrea el entorno virtual (guarda rutas absolu
 
 ## Uso
 
-Abre el juego en el navegador, deja el tablero completo y visible, y ejecuta desde la terminal. Tienes unos segundos (`--countdown`, 3 por defecto) para volver a enfocar el navegador.
+Abre el juego en el navegador y ejecuta desde la terminal: no hace falta cambiar de ventana ni hacer clic. El bot busca la pestaña del juego (URL o título con «diamond»), la trae al frente, espera a ver el tablero y hace un clic de foco en la franja oscura junto al juego (fuera del tablero y de los botones) para que le lleguen las flechas; después devuelve el ratón a su sitio. Con `--manual` vuelve el arranque antiguo (cuenta atrás y clic tuyo).
 
 ```bash
 # Prueba segura: captura, calcula y muestra la ruta SIN pulsar teclas
@@ -81,7 +81,14 @@ El retardo por defecto es 0.25 s por paso. Si el juego pierde pulsaciones, usa `
 | `--needed N` | Fuerza cuántos diamantes faltan. |
 | `--spikes once\|floor\|wall` | Cómo tratar los pinchos (por defecto `once`: se pisan una vez). |
 | `--delay S` | Segundos por paso (0.25). |
-| `--countdown S` | Segundos de espera antes de capturar (3). |
+| `--safe` | Confirma cada paso en pantalla antes de enviar el siguiente: no usa `--delay`, va al ritmo real del juego y reenvía la tecla si el juego no reacciona. |
+| `--safe-espera S` | Con `--safe`: segundos sin reacción antes de reenviar (0,6). |
+| `--peso W` | Busca directamente con A* ponderado de peso W (p. ej. `10`): mucho más rápido, la ruta puede no ser la más corta. Los niveles en caché no cambian. |
+| `--manual` | Arranque antiguo: cuenta atrás y tú cambias al navegador y haces clic. |
+| `--navegador APP` | Navegador a usar (`"Google Chrome"`, `Safari`, `"Brave Browser"`...). Por defecto lo busca solo. |
+| `--pestana TEXTO` | Texto de la URL o el título de la pestaña del juego (`diamond`). |
+| `--clic MODO` | Clic de foco: `borde` (defecto), `tablero` (última fila) o `no`. |
+| `--countdown S` | Cuenta atrás antes de empezar (3 con `--manual`, 0 sin él). |
 | `--max-seconds S` | Tiempo máximo de búsqueda del A\* (120). |
 | `--historial` | Muestra el resumen de intentos y sale. |
 | `--no-historial` | No pregunta ni guarda el resultado. |

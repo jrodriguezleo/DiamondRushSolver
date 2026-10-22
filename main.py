@@ -16,7 +16,15 @@ Opciones utiles:
     --needed N       diamantes que FALTAN por recoger para abrir la salida (por defecto se
                      lee de la cabecera; si no se puede, todos los visibles).
     --delay S        segundos por paso (por defecto 0.25). Subelo si el juego pierde pasos.
-    --countdown S    segundos para cambiar al navegador antes de capturar (por defecto 3).
+    --countdown S    con --manual: segundos para cambiar al navegador antes de capturar (por defecto 3).
+    --safe           confirma cada paso en pantalla antes de enviar el siguiente: no usa --delay, va al
+                     ritmo real del juego y reenvia una tecla si el juego no reacciona (--safe-espera S).
+    --manual         arranque antiguo: cuenta atras y TU cambias al navegador y haces clic en el juego.
+                     Sin --manual el bot trae solo la pestana del juego al frente (AppleScript), espera
+                     a verlo en pantalla y hace un clic de foco en la franja oscura junto al tablero.
+    --navegador APP  navegador a usar (p. ej. "Google Chrome", Safari). Por defecto lo busca solo.
+    --pestana TEXTO  texto de la URL o del titulo de la pestana del juego (por defecto "diamond").
+    --clic MODO      donde hacer el clic de foco: borde (por defecto), tablero o no.
     --spikes MODO    pinchos: once (por defecto: se pisan UNA vez y luego son pared), floor o wall.
     --level N        NO usa la vision: juega la solucion optima guardada del nivel N, con el
                      numero que muestra el juego en la cabecera. El nivel debe estar recien
@@ -39,6 +47,7 @@ from diamond_rush_vision import DiamondRushVision
 from bot_solver import grid_to_layout, solve_layout_text, moves_to_keys
 from known_levels import KNOWN
 import historial
+import enfoque
 import nivel as nivel_mod
 from hud_reader import HudReader
 
@@ -51,6 +60,24 @@ def cuenta_atras(segundos, texto):
     for s in range(int(segundos), 0, -1):
         print("%s %d..." % (texto, s), flush=True)
         time.sleep(1)
+
+
+def preparar_juego(args, texto, vision=None):
+    """Deja el juego delante y con el foco del teclado antes de capturar o de pulsar teclas.
+    Solo la primera vez (en --loop el foco ya esta puesto). Devuelve la ultima captura (o None)
+    para reutilizarla en la vision."""
+    if getattr(args, "_enfocado", False):
+        return None
+    args._enfocado = True
+    if args.manual:
+        if args.countdown:
+            cuenta_atras(args.countdown, texto)
+        return None
+    if args.countdown:  # --countdown explicito sin --manual: pausa extra antes de empezar
+        cuenta_atras(args.countdown, "Empiezo en")
+    img, _ = enfoque.preparar(vision or DiamondRushVision(), navegador=args.navegador, patron=args.pestana,
+                              clic=args.clic, hacer_clic=not args.dry)
+    return img
 
 
 def eventos(layout, moves):
@@ -110,6 +137,58 @@ def jugar(keys, delay, moves=None, layout=None, verbose=False):
     return (time.perf_counter() - t0) if t0 is not None else 0.0
 
 
+def pulsar(k, hold):
+    pyautogui.keyDown(k)
+    time.sleep(hold)
+    pyautogui.keyUp(k)
+
+
+def _rect_y_fila0(args, layout, vision=None, desfase_de=None):
+    """Area del juego en pantalla y fila de la vision donde empieza `layout` (para --safe).
+    desfase_de: layout tal como se detecto (si `layout` es un mapa guardado, puede ir 1-2 filas corrido)."""
+    import contextlib
+    import io
+    from bot_solver import FIRST_BOARD_ROW
+    v = vision or DiamondRushVision()
+    rect = v.game_rectangle
+    if rect is None:
+        img = v.read_screen_realtime()
+        with contextlib.redirect_stdout(io.StringIO()):
+            rect = v.get_game_area(img)
+            if rect and desfase_de is None and layout is not None:
+                # --level / --verificar: no hay mapa detectado; se detecta ahora para alinear filas
+                lay_v, _, _ = grid_to_layout(v.realtime_mode(img=img), spikes=args.spikes)
+                desfase_de = lay_v
+    d = 0
+    if desfase_de is not None and desfase_de != layout:
+        d, _ = nivel_mod.desfase(desfase_de, layout)
+    return rect, FIRST_BOARD_ROW - (d or 0)
+
+
+def jugar_partida(args, moves, layout, vision=None, desfase_de=None):
+    """Juega la ruta: normal (retardo fijo --delay) o con --safe (confirma cada paso en pantalla).
+    Devuelve los segundos de juego."""
+    import seguro
+    import captura
+    args._safe_info = None
+    if args.safe:
+        rect, fila0 = _rect_y_fila0(args, layout, vision, desfase_de)
+        pos0 = nivel_mod.pos_jugador(layout)
+        if rect and pos0:
+            if not captura.region_rapida():
+                print("AVISO --safe: no hay captura rapida (Quartz); cada comprobacion sera lenta.")
+            print("Modo seguro: cada paso se confirma en pantalla (reenvio si el juego no reacciona en %.1f s)." % args.safe_espera)
+            res = seguro.jugar_seguro(moves, pos0, seguro.Vigia(rect, fila0), pulsar,
+                                      hold=min(0.06, args.delay / 2.0), espera_max=args.safe_espera,
+                                      verbose=mostrar_pasos(args), eventos=eventos(layout, moves))
+            args._safe_info = res
+            if res["reenvios"]:
+                print("Teclas reenviadas: %d" % res["reenvios"])
+            return res["segundos"]
+        print("AVISO --safe: no se encontro el juego o el jugador en el mapa; se juega con retardo fijo.")
+    return jugar(moves_to_keys(moves), args.delay, moves, layout, mostrar_pasos(args))
+
+
 def texto_tiempo(segundos, n_pasos):
     m, sec = divmod(segundos, 60)
     t = ("%d min %05.2f s" % (m, sec)) if m else ("%.2f s" % sec)
@@ -122,10 +201,13 @@ def mostrar_pasos(args):
 
 def registrar(args, datos, n_pasos):
     """Pregunta si la ejecucion fue correcta y la guarda en el historial."""
-    if args.dry or args.no_historial:
+    if args.dry:
         return
     if args.loop:  # sin preguntas: el bucle verifica solo si el juego paso de nivel
-        args._pendiente = datos
+        datos["safe_info"] = getattr(args, "_safe_info", None)
+        args._pendiente = datos  # (guardar_intento_auto ya respeta --no-historial)
+        return
+    if args.no_historial:
         return
     if datos.get("nivel") is None:
         datos["nivel"] = historial.preguntar_nivel()
@@ -135,7 +217,8 @@ def registrar(args, datos, n_pasos):
     datos["segundos_por_paso"] = round(seg / max(1, n_pasos), 3) if seg else None
     datos["config"] = {"delay": args.delay, "tecla_pulsada_s": min(0.06, args.delay / 2.0),
                        "spikes": args.spikes, "needed_forzado": args.needed,
-                       "max_seconds": args.max_seconds, "candidata": bool(getattr(args, "candidata", False))}
+                       "max_seconds": args.max_seconds, "candidata": bool(getattr(args, "candidata", False)),
+                       "safe": args.safe, "safe_info": getattr(args, "_safe_info", None)}
     resp = historial.preguntar_resultado(n_pasos)
     if resp is None:
         print("Intento no guardado.")
@@ -198,9 +281,8 @@ def verificar_ruta(args):
         return ok
     if not ok:
         print("\nLa simulacion no la da por buena, pero se prueba igual en el juego (el modelo puede estar mal).")
-    if args.countdown:
-        cuenta_atras(args.countdown, "Cambia al navegador (nivel %d recien empezado). Empiezo a pulsar en" % args.level)
-    segundos = jugar(moves_to_keys(ruta), args.delay, ruta, k["grid"], mostrar_pasos(args))
+    preparar_juego(args, "Cambia al navegador (nivel %d recien empezado). Empiezo a pulsar en" % args.level)
+    segundos = jugar_partida(args, ruta, k["grid"].strip("\n"))
     print("Listo.")
     print(texto_tiempo(segundos, len(ruta)))
     registrar(args, dict(nivel=args.level, nivel_fuente="manual", recogidos_antes=0,
@@ -224,9 +306,8 @@ def nivel_conocido(args):
     if args.dry:
         print("(--dry: no se pulsa ninguna tecla)")
         return True
-    if args.countdown:
-        cuenta_atras(args.countdown, "Cambia al navegador (nivel recien empezado). Empiezo en")
-    segundos = jugar(moves_to_keys(moves), args.delay, moves, k["grid"], mostrar_pasos(args))
+    preparar_juego(args, "Cambia al navegador (nivel recien empezado). Empiezo en")
+    segundos = jugar_partida(args, moves, k["grid"].strip("\n"))
     print("Listo.")
     print(texto_tiempo(segundos, len(moves)))
     registrar(args, dict(nivel=args.level, nivel_fuente="manual", recogidos_antes=0,
@@ -259,31 +340,38 @@ def guardar_intento_auto(args, datos, resultado, nota):
     datos["segundos_por_paso"] = round(seg / max(1, n), 3) if seg else None
     datos["config"] = {"delay": args.delay, "tecla_pulsada_s": min(0.06, args.delay / 2.0),
                        "spikes": args.spikes, "needed_forzado": args.needed,
-                       "max_seconds": args.max_seconds, "candidata": False}
+                       "max_seconds": args.max_seconds, "candidata": False,
+                       "safe": args.safe, "safe_info": datos.get("safe_info")}
     datos.update(resultado=resultado, paso_fallo=None, nota=nota, verificacion="automatica")
     historial.guardar(datos)
     print("Guardado en el historial (nivel %s: %s, verificacion automatica)." % (datos.get("nivel"), resultado))
+
+
+_VISION_HUD = None
 
 
 def nivel_en_pantalla():
     """Nivel que muestra la cabecera ahora mismo, o None si no se puede leer."""
     import contextlib
     import io
+    global _VISION_HUD
     try:
-        v = DiamondRushVision()
+        if _VISION_HUD is None:  # cargar plantillas una sola vez, no en cada sondeo
+            _VISION_HUD = (DiamondRushVision(), HudReader())
+        v, lector = _VISION_HUD
         img = v.read_screen_realtime()
         with contextlib.redirect_stdout(io.StringIO()):
             rect = v.get_game_area(img)
         if not rect:
             return None
-        hud = HudReader().read(img, rect)
+        hud = lector.read(img, rect)
         return hud["level"] if hud.get("ok") else None
     except Exception:
         return None
 
 
-def esperar_cambio_de_nivel(nivel, timeout):
-    """Mira la cabecera cada segundo hasta que cambie el numero de nivel.
+def esperar_cambio_de_nivel(nivel, timeout, intervalo=0.3):
+    """Mira la cabecera cada `intervalo` s hasta que cambie el numero de nivel.
     Devuelve (nuevo_nivel, 'cambio') | (nivel, 'igual') | (None, 'ilegible')."""
     t0 = time.time()
     visto = None
@@ -293,17 +381,16 @@ def esperar_cambio_de_nivel(nivel, timeout):
             visto = n
             if n != nivel:
                 return n, "cambio"
-        time.sleep(1)
+        time.sleep(intervalo)
     return (visto, "igual") if visto is not None else (None, "ilegible")
 
 
 def un_nivel(args):
     if args.level:
         return nivel_conocido(args)
-    if args.countdown:
-        cuenta_atras(args.countdown, "Cambia al navegador con el juego completo visible. Capturo en")
     vision = DiamondRushVision()
-    grid = vision.realtime_mode(show_image=False)
+    img0 = preparar_juego(args, "Cambia al navegador con el juego completo visible. Capturo en", vision)
+    grid = vision.realtime_mode(show_image=False, img=img0)
     hud = leer_cabecera(vision)
 
     layout, hand0, avisos = grid_to_layout(grid, spikes=args.spikes)
@@ -313,6 +400,8 @@ def un_nivel(args):
     # La cabecera puede tapar la fila superior: si faltan diamantes, usar el mapa guardado.
     guardado, needed_guardado = nivel_mod.completar_con_guardado(layout, info, hud)
     origen_mapa = "detectado"
+    p_visto = nivel_mod.pos_jugador(layout)
+    layout_visto = layout
     if guardado is not None:
         avisos.append("el mapa detectado esta incompleto (la cabecera tapa parte del tablero): "
                       "se usa el mapa guardado del nivel %d" % info["nivel"])
@@ -329,14 +418,28 @@ def un_nivel(args):
     if origen_mapa == "detectado" and kg and kg.get("usar_guardado"):
         d, sc = nivel_mod.desfase(layout, kg["grid"])
         if d == 0 and sc <= 8:
-            avisos.append("se usa el mapa guardado del nivel %d (la vision no lee bien algunas casillas de este nivel)" % info["nivel"])
-            layout, origen_mapa = kg["grid"].strip("\n"), "guardado"
+            if kg.get("casillas_guardadas"):
+                # solo se corrigen las casillas que la vision lee mal; jugador y rocas, de la pantalla
+                layout, cambios = nivel_mod.corregir_casillas(layout, info["nivel"])
+                origen_mapa = "detectado+correcciones"
+                for r, c, visto, guard in cambios:
+                    avisos.append("casilla (fila %d, col %d): la vision ve '%s', se usa '%s' del mapa guardado" % (r, c, visto, guard))
+            else:
+                avisos.append("se usa el mapa guardado del nivel %d (la vision no lee bien algunas casillas de este nivel)" % info["nivel"])
+                layout, origen_mapa = kg["grid"].strip("\n"), "guardado"
             needed = args.needed if args.needed is not None else kg["needed"]
     # Niveles de totem (sin diamantes): la cabecera puede marcar 0/14 pero no hay nada que recoger.
     if layout.count("D") == 0 and needed and args.needed is None:
         avisos.append("no hay diamantes en el mapa: el objetivo es solo llegar a la salida/totem (needed=0)")
         needed = 0
 
+    if origen_mapa == "guardado" and p_visto:
+        # el mapa guardado trae el jugador en la casilla INICIAL: si en pantalla esta en otra, la ruta no vale
+        d_g, _ = nivel_mod.desfase(layout_visto, layout)
+        p_guard = nivel_mod.pos_jugador(layout)
+        if p_guard and (p_visto[0] + (d_g or 0), p_visto[1]) != p_guard:
+            avisos.append("el jugador esta en (fila %d, col %d) y el mapa guardado lo pone en (fila %d, col %d): "
+                          "reinicia el nivel antes de jugar o la ruta saldra mal" % (p_visto[0] + (d_g or 0), p_visto[1], p_guard[0], p_guard[1]))
     links = None
     if "|" in layout:
         if origen_mapa == "guardado":
@@ -368,11 +471,22 @@ def un_nivel(args):
         print("AVISO:", a)
 
     print("\nBuscando la ruta mas corta (los niveles con muchos pinchos o llaves pueden tardar hasta ~1-2 min)...", flush=True)
+    t_busqueda = time.perf_counter()
+    peso = args.peso or (KNOWN.get(info["nivel"], {}).get("peso") if info["nivel"] is not None else None)
     try:
-        moves, origen = solve_layout_text(layout, needed=needed, hand0=hand0, links=links,
-                                          rock_over_fence=bool(KNOWN.get(info["nivel"], {}).get("rock_over_fence", True)),
-                                          rock_on_spike=bool(KNOWN.get(info["nivel"], {}).get("rock_on_spike", True)),
-                                          time_limit=args.max_seconds, max_expansions=6_000_000)
+        if peso:  # --peso W: directo a A* ponderado (rapido, no garantiza la ruta mas corta)
+            moves, origen = solve_layout_text(layout, needed=needed, hand0=hand0, links=links,
+                                              rock_over_fence=bool(KNOWN.get(info["nivel"], {}).get("rock_over_fence", True)),
+                                              rock_on_spike=bool(KNOWN.get(info["nivel"], {}).get("rock_on_spike", True)),
+                                              time_limit=args.max_seconds, max_expansions=6_000_000, weight=peso)
+            if origen == "A*":
+                origen = "A* rapido peso %g (%s, no garantiza la ruta mas corta)" % (
+                    peso, "--peso" if args.peso else "predeterminado del nivel %d" % info["nivel"])
+        else:
+            moves, origen = solve_layout_text(layout, needed=needed, hand0=hand0, links=links,
+                                              rock_over_fence=bool(KNOWN.get(info["nivel"], {}).get("rock_over_fence", True)),
+                                              rock_on_spike=bool(KNOWN.get(info["nivel"], {}).get("rock_on_spike", True)),
+                                              time_limit=args.max_seconds, max_expansions=6_000_000)
     except ValueError as e:
         print("\nNo se pudo interpretar el nivel:", e)
         print("Revisa que el juego este completo y visible, sin nada encima.")
@@ -392,13 +506,13 @@ def un_nivel(args):
         print("Posibles causas: la vision detecto mal alguna casilla, o el nivel necesita reglas no modeladas.")
         return False
 
-    print("\nSolucion (%s): %d pasos" % (origen, len(moves)))
+    print("\nSolucion (%s): %d pasos  [busqueda %.1f s]" % (origen, len(moves), time.perf_counter() - t_busqueda))
     print(moves)
     if args.dry:
         print("(--dry: no se pulsa ninguna tecla)")
         return True
     print("Jugando...")
-    segundos = jugar(moves_to_keys(moves), args.delay, moves, layout, mostrar_pasos(args))
+    segundos = jugar_partida(args, moves, layout, vision, layout_visto)
     print("Listo.")
     print(texto_tiempo(segundos, len(moves)))
     registrar(args, dict(nivel=info["nivel"], nivel_fuente=info["fuente"],
@@ -417,10 +531,17 @@ def main():
     ap.add_argument("--level", type=int, default=None,
                     help="jugar la solucion guardada del nivel N (numero de la cabecera del juego), sin vision")
     ap.add_argument("--delay", type=float, default=DELAY_DEFECTO, help="segundos por paso")
-    ap.add_argument("--countdown", type=int, default=3, help="segundos antes de capturar")
+    ap.add_argument("--countdown", type=int, default=None, help="segundos de cuenta atras antes de empezar (con --manual, 3 por defecto; sin --manual, 0)")
+    ap.add_argument("--manual", action="store_true", help="arranque antiguo: cuenta atras y tu cambias al navegador y haces clic en el juego")
+    ap.add_argument("--navegador", default=None, help='app del navegador ("Google Chrome", Safari, "Brave Browser"...). Por defecto se busca la pestana del juego en todos')
+    ap.add_argument("--pestana", default="diamond", help="texto de la URL o titulo de la pestana del juego (por defecto: diamond)")
+    ap.add_argument("--clic", choices=["borde", "tablero", "no"], default="borde", help="clic de foco: en la franja oscura junto al juego (por defecto), en la ultima fila del tablero, o ninguno")
     ap.add_argument("--wait", type=int, default=3, help="con --loop: segundos de pausa tras detectar el nivel nuevo, antes de capturarlo")
     ap.add_argument("--timeout-siguiente", type=int, default=25, help="con --loop: segundos maximos esperando que la cabecera cambie de nivel")
     ap.add_argument("--max-niveles", type=int, default=0, help="con --loop: parar tras N niveles completados (0 = sin limite)")
+    ap.add_argument("--safe", action="store_true", help="confirmar cada paso en pantalla antes de enviar el siguiente (sin retardo fijo; reenvia teclas perdidas)")
+    ap.add_argument("--safe-espera", type=float, default=0.6, help="con --safe: segundos sin reaccion del juego antes de reenviar una tecla (0.6)")
+    ap.add_argument("--peso", type=float, default=None, help="buscar directamente con A* ponderado de este peso (p. ej. 10): mucho mas rapido, pero la ruta puede no ser la mas corta. La cache de niveles conocidos se sigue usando")
     ap.add_argument("--max-seconds", type=int, default=120, help="tiempo maximo de busqueda de A*")
     ap.add_argument("--spikes", choices=["once", "floor", "wall"], default="once",
                     help="pinchos: once = se pisan una vez y luego son pared (por defecto), floor = suelo, wall = pared")
@@ -431,6 +552,8 @@ def main():
     ap.add_argument("--historial", action="store_true", help="mostrar el resumen de intentos y salir")
     ap.add_argument("--no-historial", action="store_true", help="no preguntar ni guardar el resultado")
     args = ap.parse_args()
+    if args.countdown is None:
+        args.countdown = 3 if args.manual else 0
 
     if args.historial:
         historial.resumen()

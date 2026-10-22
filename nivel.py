@@ -131,6 +131,32 @@ def desfase(layout, grid):
     return mejor
 
 
+def pos_jugador(layout):
+    """(fila, col) de la 'P' del layout, o None."""
+    for r, f in enumerate(layout.strip("\n").split("\n")):
+        if "P" in f:
+            return r, f.index("P")
+    return None
+
+
+def corregir_casillas(layout, nivel):
+    """Para niveles con `casillas_guardadas` en KNOWN: copia del mapa guardado SOLO esas casillas
+    (las que la vision lee mal) y deja el resto como se ve en pantalla (jugador, rocas...).
+    Devuelve (layout, lista de cambios (fila, col, visto, guardado))."""
+    k = KNOWN.get(nivel) or {}
+    fijas = k.get("casillas_guardadas")
+    if not fijas:
+        return layout, []
+    filas = [list(f) for f in layout.strip("\n").split("\n")]
+    guard = k["grid"].strip("\n").split("\n")
+    cambios = []
+    for r, c in fijas:
+        if r < len(filas) and c < len(filas[r]) and filas[r][c] != guard[r][c]:
+            cambios.append((r, c, filas[r][c], guard[r][c]))
+            filas[r][c] = guard[r][c]
+    return "\n".join("".join(f) for f in filas), cambios
+
+
 def completar_con_guardado(layout, info, hud, umbral=10.0):
     """Si la cabecera dice que no se ha recogido ningun diamante pero el mapa detectado tiene menos
     de los necesarios (parte del tablero tapada por la cabecera o por el cuadro WALKTHROUGH) y se

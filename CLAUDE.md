@@ -46,6 +46,10 @@ Flujo actual (lo que usa `main.py`):
 - `known_levels.py`: niveles 1-20 (layout, `needed`, `links`, solución óptima).
 - `historial.py`: registro de intentos en `historial_intentos.jsonl`.
 - `main.py`: CLI y bucle de juego.
+- `enfoque.py`: arranque sin interacción (AppleScript trae la pestaña del juego al frente, espera
+  el área del juego estable y hace un clic de foco en la franja oscura izquierda; `--manual` lo desactiva).
+- `captura.py`: captura rápida con Quartz; la 1.ª vez se compara con pyautogui y si no coincide
+  (tamaño/colores) se usa pyautogui. Toda captura pasa por `vision.read_screen_realtime`.
 Código heredado del agente codicioso original (NO lo usa `main.py`, se conserva por referencia
 y para `v0.1-estable`): `smart_agent.py`, `game_state.py`, `a_star.py`, `rock_simulation.py`
 (con simulación de rocas defectuosa), `keyboard_simulator.py`, `cell.py`, `game_action.py`.
@@ -71,8 +75,9 @@ y para `v0.1-estable`): `smart_agent.py`, `game_state.py`, `a_star.py`, `rock_si
 - `bot_solver.py`: puente visión -> layout (`grid_to_layout`) y caché (`solve_layout_text`).
 - `known_levels.py`: niveles 1-20. Sirve de caché y de prueba de regresión.
 - `main.py`: `--dry`, `--loop`, `--needed N`, `--delay S` (defecto 0.25; usar 0.3 si se pierden
-  teclas), `--countdown S`, `--wait S`, `--timeout-siguiente S`, `--max-niveles N`,
-  `--max-seconds S`, `--spikes once|floor|wall`, `--level N` (juega la solución guardada sin
+  teclas), `--manual`, `--navegador APP`, `--pestana TEXTO`, `--clic borde|tablero|no`,
+  `--countdown S` (0 por defecto; 3 con `--manual`), `--wait S`, `--timeout-siguiente S`, `--max-niveles N`,
+  `--max-seconds S`, `--peso W` (A* ponderado directo; la caché se respeta), `--spikes once|floor|wall`, `--level N` (juega la solución guardada sin
   visión), `--candidata`, `--verificar RUTA`, `--traza`, `--pasos`, `--historial`, `--no-historial`.
 - Si A* óptimo agota el tiempo, `main.py` reintenta con A* ponderado (pesos 2, 5 y 10): ruta
   válida pero no necesariamente la más corta.
@@ -145,7 +150,14 @@ si no se lee -> `no_se` y se detiene. `--max-niveles N` limita la tanda. No se c
 - Nivel 20 (tótem): la salida es un TÓTEM dorado (plantilla `objects_in_game/totem.png`,
   símbolo 'E'); no hay diamantes (la cabecera dice 0/14: se ignora, `needed=0`). Está en (8,1),
   solo se llega por el hoyo (7,1), que hay que rellenar con una roca. La visión lee mal dos hoyos
-  ((0,1) como suelo y (7,1) como pincho), por eso el nivel lleva `usar_guardado=True`.
+  ((0,1) como suelo y (7,1) como pincho), por eso el nivel lleva `usar_guardado=True` y
+  `casillas_guardadas=[(0,1),(6,1)]` (índices del tablero de 13 filas). Desde 2026-10-21 SOLO esas dos casillas
+  salen del mapa guardado; jugador y rocas se leen de la pantalla (antes se copiaba el mapa entero y el
+  jugador quedaba siempre en (2,7), aunque estuviera en otra casilla). Con el nivel recién empezado el
+  resultado es idéntico al guardado y usa la caché (81 pasos); si no, A* (ponderado: ~1,5 min).
+  Lleva `peso=10` en `known_levels`: si hay que buscar ruta, va directo a A* ponderado peso 10 (~1 s);
+  `--peso W` lo sustituye.
+  Con el mapa guardado completo (nivel 8) se avisa si el jugador no está en la casilla inicial.
 - Pinchos de los niveles 2, 5, 10, 15, 17, 18, 19 detectados en capturas pero sin confirmar uno
   a uno (las rutas funcionaron igualmente). Nivel 3: (3,3),(4,2),(10,2),(10,3). Nivel 8: 6
   pinchos confirmados con captura. Niveles 12 y 13 anotados.
@@ -156,6 +168,25 @@ si no se lee -> `no_se` y se detiene. `--max-niveles N` limita la tanda. No se c
 `python main.py --level N --verificar "DDLR..."` simula la ruta sobre el mapa guardado y la juega
 pulsando las teclas (`--dry`: solo simula; `--traza`: todos los pasos). Muestra qué reglas
 dudosas necesita la ruta.
+
+## Arranque automático (2026-10-21, SIN probar aún en el Mac)
+Sin `--manual` no hay cuenta atrás: activar navegador + esperar juego + clic tarda ~0,3 s. Se quitó un
+`sleep(1)` inútil de `realtime_mode` (la imagen ya estaba capturada) y la 1.ª captura se reutiliza.
+En `--loop` la cabecera se sondea cada 0,3 s (antes 1 s) reutilizando visión y plantillas. Corregido:
+`--loop --no-historial` no verificaba el cambio de nivel y seguía a ciegas. En `--dry` se activa el
+navegador pero no se hace clic. Probado en Linux con capturas de `screenshots/Levels` (clic en la franja
+en los 20 niveles); falta probar AppleScript, el clic real y la captura Quartz en macOS.
+
+## Modo --safe (2026-10-21, SIN probar aún en el juego real)
+`seguro.py`: tras cada flecha captura SOLO el rectángulo del juego (`captura.capturar_region`, Quartz) cada
+~5 ms y compara miniaturas grises 16x16 de la casilla de origen y la de destino con las de antes de pulsar.
+Cambio > 10 -> tecla recibida; luego espera a que el destino haya cambiado y origen+destino sigan quietos
+(< 3) durante 50 ms -> siguiente tecla. Sin cambio en `--safe-espera` (0,6 s) -> reenvía (máx. 2) y si no,
+se detiene. El último paso también se confirma. Casillas: fila de visión = fila del layout + 2 - desfase
+(nivel 8: desfase 1); verificado con las 20 capturas. En un juego simulado (captura del nivel 1, animaciones
+de 80-800 ms, teclas ignoradas durante el movimiento y 15 % de teclas perdidas) acierta 6/6; con navegador
+lento `--delay 0.25/0.3` perdía 7-9 teclas. Riesgos en el juego real: animaciones en reposo dentro de la
+casilla (brillos, jugador) podrían confundir los umbrales; sin Quartz cada captura es lenta (avisa).
 
 ## Pendiente
 1. Tests automáticos (regresión de las soluciones conocidas y de la lectura de cabecera).
