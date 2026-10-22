@@ -153,3 +153,7 @@ Código heredado del agente codicioso original, que `main.py` ya no usa (se mant
 - Solo se ha probado en macOS con pantalla Retina.
 - El repositorio no incluye un archivo `LICENSE`. Antes de redistribuir el código conviene revisar la licencia del proyecto original.
 
+## Video Demo
+
+[![Video demostración del agente](https://img.youtube.com/vi/<vBUj9E9z4-0>/hqdefault.jpg)](https://youtu.be/vBUj9E9z4-0)
+
